@@ -1,6 +1,7 @@
 #include "SDL.h"
 #include <stdio.h>
 #include "SDL_opengl.h"
+#include "SDL_image.h"
 #include <stdint.h>
 
 #define u32 uint32_t
@@ -129,6 +130,11 @@ vec2 transformPoint(transform t, vec2 point, f32 heightOverWidth) {
     return result;
 }
 
+f32 lerp(f32 a, f32 b, f32 t) {
+    f32 result = (a * (1 - t)) + (b * t);
+    return result;
+}
+
 //color
 struct color {
 	f32 r, g, b, a;
@@ -143,28 +149,28 @@ color lerp(color a, color b, f32 t) {
 
 	return result;
 }
-void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
+void drawQuad(transform xForm, f32 heightOverWidth, f32 doFlip = 0.0f, vec2 center = {0.5f, 0.5f}){
 	
-	glBegin(GL_QUADS);
-	
-	glColor4f(0.5f, 0.88f, 0.1f, 0.8f);
+   	glBegin(GL_QUADS);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+//assuming our textures are flipped        
+        
+        glTexCoord2f(0, lerp(1, 0, doFlip));  	
 	vec2 v = transformPoint(xForm, vec2{0, 0} - center, heightOverWidth);
 	glVertex2f(v.x, v.y);
 	
-	glColor4f(0.9f, 0.3f, 0.111f, 0.8f);
+        glTexCoord2f(1, lerp(1, 0, doFlip));
 	v= transformPoint(xForm, vec2{1, 0} - center, heightOverWidth);
 	glVertex2f(v.x, v.y);
 	
-	glColor4f(0.5f, 0.5f, 0.5f, 1.0f);
+        glTexCoord2f(1, lerp(0, 1, doFlip));
 	v = transformPoint(xForm, vec2{1, 1} - center, heightOverWidth);
 	glVertex2f(v.x, v.y);
 	
-	
-	glColor4f(0.1f, 0.1f, 0.1f, 0.8f);
+	glTexCoord2f(0, lerp(0, 1, doFlip));
 	v = transformPoint(xForm, vec2{0, 1} - center, heightOverWidth);
 	glVertex2f(v.x, v.y);
-	
-	
+		
 	glEnd();
 }
 
@@ -245,6 +251,19 @@ int main(int argc, char* argv[]) {
     u64 lastTime = SDL_GetPerformanceCounter();
     f32 scaleAlpha = 0;
     
+    GLuint playerTexture;
+    {
+        SDL_Surface *playerTextureSurface = IMG_Load("data/kenney_animalpackredux/PNG/Round/giraffe.png");
+        
+        glGenTextures(1, &playerTexture);
+        glBindTexture(GL_TEXTURE_2D, playerTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, playerTextureSurface->w, playerTextureSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, playerTextureSurface->pixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+
+        SDL_FreeSurface(playerTextureSurface);
+    }
     entity player; 
     player.xForm = TRANSFORM_IDENTITY;
     player.xForm.scale = 0.1f;
@@ -429,7 +448,19 @@ int main(int argc, char* argv[]) {
         }
         
         drawHistogram(frameRateHistogram);
+        
+        glEnable(GL_TEXTURE_2D);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	drawQuad(player.xForm, heightOverWidth);
+        glDisable(GL_BLEND);
+        glDisable(GL_TEXTURE_2D);
+        
+        auto glError = glGetError();
+        if(glError != GL_NO_ERROR) {
+            printf("gl error:%d \n", glError);
+        }
+        
         SDL_GL_SwapWindow(window);
     }
     
