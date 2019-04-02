@@ -27,6 +27,14 @@ vec2 operator* (vec2 a, f32 scale) {
     return result;
 }
 
+vec2 operator* (vec2 a, vec2 b) {
+    vec2 result;
+    result.x = a.x * b.x;
+    result.y = a.y * b.y;
+    
+    return result;
+}
+
 vec2 operator+ (vec2 a, vec2 b) {
     vec2 result;
     result.x = a.x + b.x;
@@ -42,6 +50,15 @@ vec2 operator- (vec2 a, vec2 b) {
     
     return result;
 }
+
+vec2 operator- (vec2 a) {
+    vec2 result;
+    result.x = -a.x;
+    result.y = -a.y;
+    
+    return result;
+}
+
 
 f32 dot(vec2 a, vec2 b) {
     return (a.x * b.x + a.y * b.y);

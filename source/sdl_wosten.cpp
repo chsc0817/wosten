@@ -3,6 +3,8 @@
 #include "SDL_opengl.h"
 #include "SDL_image.h"
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "defines.h"
 #include "render.h"
@@ -49,13 +51,22 @@ enum entity_type{
 };
 
 struct entity {
-	transform xForm;
-	f32 collisionRadius;
+    transform xForm;
+    f32 collisionRadius;
     u32 hp, maxHp;
     entity_type type;
     bool markedForDeletion;
     u32 collisionTypeMask;
     f32 blinkTime, blinkDuration;
+    vec2 relativeDrawCenter;
+    
+    union {
+        struct {
+           f32 flipCountdown, flipInterval;
+           vec2 velocity;
+        } fly;
+    };
+    
 };
 
 entity* nextEntity(entity *entities, u32 entityCapacity, u32 *entityCount){
@@ -69,9 +80,15 @@ entity* nextEntity(entity *entities, u32 entityCapacity, u32 *entityCount){
     return NULL;
 }
 
-void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
-    
-    
+f32 randZeroToOne(){
+    return ((rand()  %  RAND_MAX) / (f32) RAND_MAX);
+}
+
+f32 randMinusOneToOne(){
+    return (randZeroToOne() * 2 - 1.0f);
+}
+
+void update(entity *entities, u32 *entityCount, f32 deltaSeconds){    
     for(u32 i = 0; i < *entityCount; i++) {
         
         auto e = entities + i;
@@ -81,7 +98,7 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
                 
                 vec2 dir = normalizeOrZero(transformPoint(e->xForm, {0, 1}, 1) - e->xForm.pos);
                 
-                //e->xForm.pos.y += speed * deltaTime;
+                //e->xForm.pos.y += speed * deltaSeconds;
                 f32 speed = 1.0f; 
                 e->xForm.pos = e->xForm.pos + dir * (speed * deltaSeconds);
                 
@@ -115,6 +132,30 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
                 e->markedForDeletion = doDelete;
                 
             } break;
+            
+            case Entity_Type_Fly:{
+                if (e->hp == 0) {
+                    e->markedForDeletion = true;
+                } 
+                
+                f32 t = deltaSeconds;
+                
+                while (e->fly.flipCountdown < t) {
+                    e->xForm.pos = e->xForm.pos + e->fly.velocity * e->fly.flipCountdown;
+                    t -= e->fly.flipCountdown;
+                    e->fly.velocity = -(e->fly.velocity);
+                    e->fly.flipCountdown += e->fly.flipInterval;
+                }
+                
+                e->fly.flipCountdown -= deltaSeconds;
+                e->xForm.pos = e->xForm.pos + e->fly.velocity * t;
+                
+                if (e->blinkTime > 0) e->blinkTime -= deltaSeconds;
+            } break;
+            
+            case Entity_Type_Boss:{
+                if (e->blinkTime > 0) e->blinkTime -= deltaSeconds;
+            }break;
         }
     }
     
@@ -127,7 +168,7 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
         else{ 
             i++;
         }
-    }
+    }    
 }
 
 
@@ -164,6 +205,7 @@ struct input {
 };
 
 int main(int argc, char* argv[]) {
+    srand (time(NULL));
     
     SDL_Window *window;                    // Declare a pointer
     
@@ -200,37 +242,12 @@ int main(int argc, char* argv[]) {
     u64 lastTime = SDL_GetPerformanceCounter();
     f32 scaleAlpha = 0;
     
-    GLuint playerTexture;
-    {
-        SDL_Surface *playerTextureSurface = IMG_Load("data/kenney_animalpackredux/PNG/Round/giraffe.png");
-        
-        glGenTextures(1, &playerTexture);
-        glBindTexture(GL_TEXTURE_2D, playerTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, playerTextureSurface->w, playerTextureSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, playerTextureSurface->pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        
-        
-        SDL_FreeSurface(playerTextureSurface);
-    }
-    
-    GLuint bulletTexture;
-    {
-        SDL_Surface *surface = IMG_Load("data/heart.png");
-        
-        glGenTextures(1, &bulletTexture);
-        glBindTexture(GL_TEXTURE_2D, bulletTexture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, surface->w, surface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        
-        SDL_FreeSurface(surface);
-    }
+    texture playerTexture = loadTexture("data/kenney_animalpackredux/PNG/Round/giraffe.png");
+    texture flyTexture = loadTexture("data/kenney_animalpackredux/PNG/Round/chicken.png");
+    texture bulletTexture = loadTexture("data/heart.png");  
     
     entity entities[100];
-    u32 entityCount = 0;
-    
-    
+    u32 entityCount = 0;        
     
     entity *player = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount); 
     player->xForm = TRANSFORM_IDENTITY;
@@ -240,6 +257,7 @@ int main(int argc, char* argv[]) {
     player->hp = player->maxHp;
     player->type = Entity_Type_Player;
     player->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly);
+    player->relativeDrawCenter = vec2 {0.5f, 0.4f};
 	
     
     auto boss  = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
@@ -254,6 +272,20 @@ int main(int argc, char* argv[]) {
     boss->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
     boss->blinkDuration = 0.1f;
     
+    auto fly = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
+    fly->xForm.pos = vec2{-0.7f, 0.3f};  
+    fly->xForm.rotation = 0.0f;
+    fly->xForm.scale = 0.09f;
+    fly->collisionRadius = fly->xForm.scale * 0.65;
+    fly->maxHp = 20;
+    fly->hp = fly->maxHp;
+    fly->type = Entity_Type_Fly;
+    fly->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+    fly->fly.flipInterval = 1.5f;
+    fly->fly.flipCountdown = fly->fly.flipInterval;
+    fly->fly.velocity = vec2{1.0f, 0.1f};    
+    fly->relativeDrawCenter = vec2 {0.5f, 0.44f};
+    fly->blinkDuration = 0.1f;
     
     //timer init
     
@@ -261,6 +293,7 @@ int main(int argc, char* argv[]) {
         entities[i].blinkTime = 0.0f;
     f32 bulletSpawnCooldown = 0;
 	
+    f32 chickenSpawnCooldown = 5.0f;
     
     input gameInput = {};
     
@@ -323,9 +356,8 @@ int main(int argc, char* argv[]) {
         }
         //time        
         u64 currentTime = SDL_GetPerformanceCounter();
-        double deltaTime = (double)(currentTime - lastTime) / (double)ticks;
+        double deltaSeconds = (double)(currentTime - lastTime) / (double)ticks;
         lastTime = currentTime;
-        
         
         // render begin
         s32 width, height;
@@ -342,30 +374,30 @@ int main(int argc, char* argv[]) {
         glClear(GL_COLOR_BUFFER_BIT);
         
         
-        frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaTime;
+        frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
         if (frameRateHistogram.currentIndex == ARRAY_COUNT(frameRateHistogram.values)) {
             frameRateHistogram.currentIndex = 0;
         }
         
         //bullet movement        
-        if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaTime;
-        if (boss->blinkTime > 0) boss->blinkTime -= deltaTime;
+        if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
+        
         
         vec2 direction = {};
         f32 speed = 1.0f;
         
-        update(entities, &entityCount, deltaTime);
+        update(entities, &entityCount, deltaSeconds);
         
         //player movement
         if (gameInput.leftKey.isPressed) {
             direction.x -= 1;
-            //player->xForm.rotation -= 0.5f * PI * deltaTime;
+            //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
         }
         
         if (gameInput.rightKey.isPressed) {
             direction.x += 1; 
-            //player->xForm.rotation += 0.5f * PI * deltaTime;
+            //player->xForm.rotation += 0.5f * PI * deltaSeconds;
         }
         
         if (gameInput.upKey.isPressed) {
@@ -376,7 +408,7 @@ int main(int argc, char* argv[]) {
             direction.y -= 1; 
         }
         direction = normalizeOrZero(direction);
-        direction = direction * (speed * deltaTime);
+        direction = direction * (speed * deltaSeconds);
         player->xForm.pos = player->xForm.pos + direction;
         
         {
@@ -397,7 +429,31 @@ int main(int argc, char* argv[]) {
             
 #endif
         }
-        
+    {
+         chickenSpawnCooldown -= deltaSeconds;
+    
+        if(chickenSpawnCooldown <= 0) {
+            //unleash the chicken!
+            entity *chicken = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
+
+            if (chicken != NULL) {               
+                chicken->xForm.rotation = 0.0f;
+                chicken->xForm.scale = 0.09f;
+                chicken->collisionRadius = chicken->xForm.scale * 0.65;
+                chicken->maxHp = 20;
+                chicken->hp = chicken->maxHp;
+                chicken->type = Entity_Type_Fly;
+                chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+                chicken->fly.flipInterval = 1.5f;
+                chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
+                chicken->fly.velocity = vec2{1.0f, 0.1f};    
+                chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randMinusOneToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
+                chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
+                chicken->blinkDuration = 0.1f;
+            }        
+            chickenSpawnCooldown += 1.0f;
+        }
+    }
         
         if(gameInput.fireKey.isPressed) {
             if ((bulletSpawnCooldown <= 0)) {
@@ -406,10 +462,11 @@ int main(int argc, char* argv[]) {
                 if (bullet != NULL) {
                     bullet->xForm.pos = player->xForm.pos;
                     bullet->xForm.scale = 0.05f;
-                    bullet->xForm.rotation = player->xForm.rotation;
+                    bullet->xForm.rotation = 0;
                     bullet->collisionRadius = bullet->xForm.scale * 0.5;
                     bullet->type = Entity_Type_Bullet;
                     bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
+                    bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
                     
                     bulletSpawnCooldown += 0.05f;
                 }
@@ -420,31 +477,45 @@ int main(int argc, char* argv[]) {
         
         
 		if (boss->blinkTime <= 0) {
-			drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,32);
+			drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
 		} 
 		else {
 			color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
-			drawCircle(boss->xForm, heightOverWidth, blinkColor, 32);
+			drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
 		}
         
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         
-        glBindTexture(GL_TEXTURE_2D, playerTexture);
-        drawQuad(player->xForm, heightOverWidth);
+        drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, whiteColor, player->relativeDrawCenter);
         
-        glBindTexture(GL_TEXTURE_2D, bulletTexture);
         for (u32 i = 0; i < entityCount; i++) {
             //drawCircle(bullets[i].xForm, heightOverWidth);
-            if (entities[i].type == Entity_Type_Bullet)
-                drawQuad(entities[i].xForm, heightOverWidth);
+            if (entities[i].type == Entity_Type_Bullet) {
+               drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities[i].relativeDrawCenter);
+            }
+            else if (entities[i].type == Entity_Type_Fly) {
+                if (entities[i].blinkTime <= 0) {
+			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, whiteColor, entities[i].relativeDrawCenter); 
+		} 
+		else {
+			color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities[i].blinkTime / entities[i].blinkDuration); 
+			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, blinkColor, entities[i].relativeDrawCenter);          
+		}   
+            }        
         }
         
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
         
         drawHistogram(frameRateHistogram);
+        
+        for (u32 i = 0; i < entityCount; i++) {
+            transform collisionTransform = entities[i].xForm;
+            collisionTransform.scale = 2 * entities[i].collisionRadius;
+            drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
+        }
         
         drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
         drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
