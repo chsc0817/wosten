@@ -242,10 +242,10 @@ int main(int argc, char* argv[]) {
     u64 lastTime = SDL_GetPerformanceCounter();
     f32 scaleAlpha = 0;
     
-    texture playerTexture = loadTexture("data/kenney_animalpackredux/PNG/Round/giraffe.png");
-    texture flyTexture = loadTexture("data/kenney_animalpackredux/PNG/Round/chicken.png");
-    texture bulletTexture = loadTexture("data/heart.png");  
-    
+    texture playerTexture = loadTexture("data/Kenney/Animals/giraffe.png");
+    texture flyTexture = loadTexture("data/Kenney/Animals/chicken.png");
+    texture bulletTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");  
+  
     entity entities[100];
     u32 entityCount = 0;        
     
@@ -461,9 +461,9 @@ int main(int argc, char* argv[]) {
                 
                 if (bullet != NULL) {
                     bullet->xForm.pos = player->xForm.pos;
-                    bullet->xForm.scale = 0.05f;
+                    bullet->xForm.scale = 0.2f;
                     bullet->xForm.rotation = 0;
-                    bullet->collisionRadius = bullet->xForm.scale * 0.5;
+                    bullet->collisionRadius = bullet->xForm.scale * 0.2;
                     bullet->type = Entity_Type_Bullet;
                     bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
                     bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
