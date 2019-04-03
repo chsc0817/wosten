@@ -7,6 +7,9 @@
 #define f32 float
 #define s32 int32_t 
 
+#define MAX(a,b) (a > b ? a : b)
+#define MIN(a,b) (a < b ? a : b)
+
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 #define ARRAY_WITH_COUNT(array) array, ARRAY_COUNT(array)
 
@@ -14,9 +17,11 @@
 
 #define PI 3.14159265359
 
+
 struct vec2 {
     f32 x, y;
 };
+
 
 //vector operations
 vec2 operator* (vec2 a, f32 scale) {

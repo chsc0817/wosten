@@ -42,10 +42,12 @@ void drawHistogram(histogram h) {
 }
 
 enum entity_type{
-    Entity_Type_Boss,
     Entity_Type_Player,
+    Entity_Type_Boss,
+    Entity_Type_Fly,    
     Entity_Type_Bullet,
-    Entity_Type_Fly,
+    Entity_Type_Powerup,
+
     
     Entity_Type_Count
 };
@@ -54,6 +56,7 @@ struct entity {
     transform xForm;
     f32 collisionRadius;
     u32 hp, maxHp;
+    u32 power;
     entity_type type;
     bool markedForDeletion;
     u32 collisionTypeMask;
@@ -125,7 +128,7 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
                         entities[j].blinkTime = entities[j].blinkDuration;	
                         
                         if (entities[j].hp > 0)
-                            entities[j].hp--;
+                            entities[j].hp -= e->power;;
                         
                     }
                 }
@@ -136,6 +139,15 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
             case Entity_Type_Fly:{
                 if (e->hp == 0) {
                     e->markedForDeletion = true;
+//TODO: figure out why ARRAY_WITH_COUNT(entities) returns 0
+                    entity *powerup = nextEntity(entities,100, entityCount);
+                    powerup->xForm.pos = e->xForm.pos;  
+                    powerup->xForm.rotation = 0.0f;
+                    powerup->xForm.scale = 0.02f;
+                    powerup->collisionRadius = powerup->xForm.scale * 1.3f;
+                    powerup->type = Entity_Type_Powerup;
+                    powerup->collisionTypeMask = FLAG(Entity_Type_Player); 
+                    powerup->relativeDrawCenter = vec2 {0.5f, 0.5f};
                 } 
                 
                 f32 t = deltaSeconds;
@@ -155,7 +167,29 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
             
             case Entity_Type_Boss:{
                 if (e->blinkTime > 0) e->blinkTime -= deltaSeconds;
-            }break;
+            } break;
+            
+            case Entity_Type_Powerup: {
+                
+                f32 fallSpeed = 0.8f; 
+                e->xForm.pos = e->xForm.pos + vec2{0, -1} * (fallSpeed * deltaSeconds);
+                
+                for (u32 j = 0; j < *entityCount; j++) {
+                    if (i == j)
+                        continue;
+                    
+                    if (!(e->collisionTypeMask & FLAG(entities[j].type)))
+                        continue;
+                    
+                    if (!(entities[j].collisionTypeMask & FLAG(e->type)))
+                        continue;
+                    
+                    if (areIntersecting(circle{e->xForm.pos, e->collisionRadius}, circle{entities[j].xForm.pos, entities[j].collisionRadius})) {
+                        e->markedForDeletion = true;
+                        entities[j].power++;     
+                    }
+                }                   
+            }
         }
     }
     
@@ -244,7 +278,10 @@ int main(int argc, char* argv[]) {
     
     texture playerTexture = loadTexture("data/Kenney/Animals/giraffe.png");
     texture flyTexture = loadTexture("data/Kenney/Animals/chicken.png");
-    texture bulletTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");  
+    texture bulletTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_014.png");  
+    texture bulletPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
+    texture bulletMaxPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
+    texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
   
     entity entities[100];
     u32 entityCount = 0;        
@@ -255,13 +292,12 @@ int main(int argc, char* argv[]) {
     player->collisionRadius = player->xForm.scale * 0.5;
     player->maxHp = 1;
     player->hp = player->maxHp;
+    player->power = 1;
     player->type = Entity_Type_Player;
-    player->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly);
-    player->relativeDrawCenter = vec2 {0.5f, 0.4f};
-	
+    player->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
+    player->relativeDrawCenter = vec2 {0.5f, 0.4f};	
     
-    auto boss  = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
-    
+    auto boss  = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);    
     boss->xForm.pos = vec2{0.0f, 0.5f};  
     boss->xForm.rotation = 0.0f;
     boss->xForm.scale = 0.7f;
@@ -286,7 +322,15 @@ int main(int argc, char* argv[]) {
     fly->fly.velocity = vec2{1.0f, 0.1f};    
     fly->relativeDrawCenter = vec2 {0.5f, 0.44f};
     fly->blinkDuration = 0.1f;
-    
+        
+//    auto powerup = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
+//    powerup->xForm.pos = vec2{-0.5f, 0.3f};  
+//    powerup->xForm.rotation = 0.0f;
+//    powerup->xForm.scale = 0.02f;
+//    powerup->collisionRadius = powerup->xForm.scale * 1.3f;
+//    powerup->type = Entity_Type_Powerup;
+//    powerup->collisionTypeMask = FLAG(Entity_Type_Player); 
+//    powerup->relativeDrawCenter = vec2 {0.5f, 0.5f};
     //timer init
     
     for (u32 i = 0; i < entityCount; i++)
@@ -382,8 +426,7 @@ int main(int argc, char* argv[]) {
         
         //bullet movement        
         if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
-        
-        
+              
         vec2 direction = {};
         f32 speed = 1.0f;
         
@@ -440,7 +483,7 @@ int main(int argc, char* argv[]) {
                 chicken->xForm.rotation = 0.0f;
                 chicken->xForm.scale = 0.09f;
                 chicken->collisionRadius = chicken->xForm.scale * 0.65;
-                chicken->maxHp = 20;
+                chicken->maxHp = 10;
                 chicken->hp = chicken->maxHp;
                 chicken->type = Entity_Type_Fly;
                 chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
@@ -468,6 +511,9 @@ int main(int argc, char* argv[]) {
                     bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
                     bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
                     
+                    bullet->power = (player->power / 20) + 1;
+                    bullet->power = MIN(bullet->power, 3);
+                    
                     bulletSpawnCooldown += 0.05f;
                 }
             }
@@ -476,13 +522,13 @@ int main(int argc, char* argv[]) {
         // render
         
         
-		if (boss->blinkTime <= 0) {
-			drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
-		} 
-		else {
-			color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
-			drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
-		}
+        if (boss->blinkTime <= 0) {
+                drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
+        } 
+        else {
+                color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
+                drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
+        }
         
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
@@ -491,19 +537,37 @@ int main(int argc, char* argv[]) {
         drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, whiteColor, player->relativeDrawCenter);
         
         for (u32 i = 0; i < entityCount; i++) {
-            //drawCircle(bullets[i].xForm, heightOverWidth);
-            if (entities[i].type == Entity_Type_Bullet) {
-               drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities[i].relativeDrawCenter);
-            }
-            else if (entities[i].type == Entity_Type_Fly) {
-                if (entities[i].blinkTime <= 0) {
+            switch (entities[i].type) {
+                
+                case Entity_Type_Bullet: {
+                    if (entities[i].power == 1) {
+                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities[i].relativeDrawCenter);
+                    } 
+                    else if (entities[i].power == 2){
+                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletPoweredUpTexture, whiteColor, entities[i].relativeDrawCenter);  
+                    }
+                    else {
+                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, whiteColor, entities[i].relativeDrawCenter);
+                    }
+                } break;
+                
+                case Entity_Type_Boss: {
+                } break;
+                
+                case Entity_Type_Fly: {
+                    if (entities[i].blinkTime <= 0) {
 			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, whiteColor, entities[i].relativeDrawCenter); 
-		} 
-		else {
+                    } 
+                    else {
 			color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities[i].blinkTime / entities[i].blinkDuration); 
 			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, blinkColor, entities[i].relativeDrawCenter);          
-		}   
-            }        
+                    }   
+                } break;
+                
+                case Entity_Type_Powerup: {
+                    drawTexturedQuad(entities[i].xForm, heightOverWidth, powerupTexture, whiteColor, entities[i].relativeDrawCenter);
+                } break;
+            }    
         }
         
         glDisable(GL_BLEND);
