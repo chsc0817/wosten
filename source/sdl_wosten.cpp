@@ -55,8 +55,8 @@ enum entity_type{
 struct entity {
     transform xForm;
     f32 collisionRadius;
-    u32 hp, maxHp;
-    u32 power;
+    s32 hp, maxHp;
+    
     entity_type type;
     bool markedForDeletion;
     u32 collisionTypeMask;
@@ -68,13 +68,27 @@ struct entity {
            f32 flipCountdown, flipInterval;
            vec2 velocity;
         } fly;
+        
+        struct {
+            u32 power;   
+        } player;
+        
+        struct {
+            u32 damage;   
+        } bullet;
     };
     
 };
 
-entity* nextEntity(entity *entities, u32 entityCapacity, u32 *entityCount){
-    if (*entityCount < entityCapacity) {
-        auto result = entities + ((*entityCount)++);
+struct entity_buffer {
+    entity *entries;
+    u32 entityCapacity;
+    u32 entityCount;
+};
+
+entity* nextEntity(entity_buffer *buffer){
+    if (buffer->entityCount < buffer->entityCapacity) {
+        auto result = buffer->entries + ((buffer->entityCount)++);
         *result = {};
         
         return result;
@@ -82,6 +96,16 @@ entity* nextEntity(entity *entities, u32 entityCapacity, u32 *entityCount){
     
     return NULL;
 }
+
+struct collision {
+    entity *entities[2];
+};
+
+struct game_state {
+    entity_buffer entities;
+    bool isGameover;    
+};
+
 
 f32 randZeroToOne(){
     return ((rand()  %  RAND_MAX) / (f32) RAND_MAX);
@@ -91,10 +115,106 @@ f32 randMinusOneToOne(){
     return (randZeroToOne() * 2 - 1.0f);
 }
 
-void update(entity *entities, u32 *entityCount, f32 deltaSeconds){    
-    for(u32 i = 0; i < *entityCount; i++) {
+void update(game_state *state, f32 deltaSeconds){    
+    collision collisions[1024];
+    u32 collisionCount = 0;
+    auto buffer = &state->entities;
+    
+    for(u32 i = 0; i < buffer->entityCount; i++) {
+        bool doBreak = false;
+                
+        for (u32 j = i + 1; j < buffer->entityCount; j++){
+                    
+            if (!(buffer->entries[i].collisionTypeMask & FLAG(buffer->entries[j].type)))
+                continue;
+
+            if (!(buffer->entries[j].collisionTypeMask & FLAG(buffer->entries[i].type)))
+                continue;
+
+            if (areIntersecting(circle{buffer->entries[i].xForm.pos, buffer->entries[i].collisionRadius}, circle{buffer->entries[j].xForm.pos, buffer->entries[j].collisionRadius})) 
+            {
+                if (collisionCount >= ARRAY_COUNT(collisions)) {
+                    doBreak = true;
+                    break;
+                }
+                
+                auto newCollision = collisions + (collisionCount++);               
+                
+                if (buffer->entries[i].type < buffer->entries[j].type) {
+                    newCollision->entities[0] = (buffer->entries) + i;
+                    newCollision->entities[1] = (buffer->entries) + j;
+                }
+                else {
+                    newCollision->entities[1] = (buffer->entries) + i;
+                    newCollision->entities[0] = (buffer->entries) + j;
+                }
+            }
+        }
         
-        auto e = entities + i;
+        if(doBreak) {
+            break;
+        }
+    }
+    
+    for (u32 i = 0; i < collisionCount; i++) {
+        auto current = collisions + i;
+        
+        switch (FLAG(current->entities[0]->type) | FLAG(current->entities[1]->type)) {
+            case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Powerup)): {
+                auto player = current->entities[0];
+                auto powerup = current->entities[1];
+                
+                assert((player->type == Entity_Type_Player) && (powerup->type == Entity_Type_Powerup));
+                                
+                powerup->markedForDeletion = true;
+                player->player.power++;
+                
+            } break;
+            
+            case (FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly)): {
+                auto fly = current->entities[0];
+                auto bullet = current->entities[1];
+                
+                assert((fly->type == Entity_Type_Fly) && (bullet->type == Entity_Type_Bullet));
+                                 
+                bullet->markedForDeletion = true;
+                fly->hp -= bullet->bullet.damage;  
+                fly->blinkTime = fly->blinkDuration;
+                
+            } break;
+            
+            case (FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Boss)): {
+                auto boss = current->entities[0];
+                auto bullet = current->entities[1];
+                
+                assert((boss->type == Entity_Type_Boss) && (bullet->type == Entity_Type_Bullet));
+                                 
+                bullet->markedForDeletion = true;
+                boss->hp -= bullet->bullet.damage;
+                boss->blinkTime = boss->blinkDuration;
+            
+            } break;   
+            
+            case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Boss)): 
+            case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Fly)): {
+                
+                auto player = current->entities[0];
+                auto enemy = current->entities[1];
+                
+                assert(player->type == Entity_Type_Player);
+                                                 
+                state->isGameover = true;
+                return;
+            
+            } break;  
+        }
+    }
+    
+    
+    
+    for(u32 i = 0; i < buffer->entityCount; i++) {
+        
+        auto e = buffer->entries + i;
         
         switch(e->type) {
             case Entity_Type_Bullet: {
@@ -104,43 +224,17 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
                 //e->xForm.pos.y += speed * deltaSeconds;
                 f32 speed = 1.0f; 
                 e->xForm.pos = e->xForm.pos + dir * (speed * deltaSeconds);
-                
-                bool doDelete = false;
-                
+               
                 if (e->xForm.pos.y >= 1) {
-                    doDelete = true;
-                }
-                
-                for (u32 j = 0; j < *entityCount; j++){
-                    
-                    if (i == j)
-                        continue;
-                    
-                    if (!(e->collisionTypeMask & FLAG(entities[j].type)))
-                        continue;
-                    
-                    if (!(entities[j].collisionTypeMask & FLAG(e->type)))
-                        continue;
-                    
-                    if (areIntersecting(circle{e->xForm.pos, e->collisionRadius}, circle{entities[j].xForm.pos, entities[j].collisionRadius})) 
-                    {
-                        doDelete = true;
-                        entities[j].blinkTime = entities[j].blinkDuration;	
-                        
-                        if (entities[j].hp > 0)
-                            entities[j].hp -= e->power;;
-                        
-                    }
-                }
-                e->markedForDeletion = doDelete;
-                
+                    e->markedForDeletion = true;
+                }                               
             } break;
             
             case Entity_Type_Fly:{
-                if (e->hp == 0) {
+                if (e->hp <= 0) {
                     e->markedForDeletion = true;
-//TODO: figure out why ARRAY_WITH_COUNT(entities) returns 0
-                    entity *powerup = nextEntity(entities,100, entityCount);
+
+                    entity *powerup = nextEntity(buffer);
                     powerup->xForm.pos = e->xForm.pos;  
                     powerup->xForm.rotation = 0.0f;
                     powerup->xForm.scale = 0.02f;
@@ -169,35 +263,18 @@ void update(entity *entities, u32 *entityCount, f32 deltaSeconds){
                 if (e->blinkTime > 0) e->blinkTime -= deltaSeconds;
             } break;
             
-            case Entity_Type_Powerup: {
-                
+            case Entity_Type_Powerup: {                
                 f32 fallSpeed = 0.8f; 
-                e->xForm.pos = e->xForm.pos + vec2{0, -1} * (fallSpeed * deltaSeconds);
-                
-                for (u32 j = 0; j < *entityCount; j++) {
-                    if (i == j)
-                        continue;
-                    
-                    if (!(e->collisionTypeMask & FLAG(entities[j].type)))
-                        continue;
-                    
-                    if (!(entities[j].collisionTypeMask & FLAG(e->type)))
-                        continue;
-                    
-                    if (areIntersecting(circle{e->xForm.pos, e->collisionRadius}, circle{entities[j].xForm.pos, entities[j].collisionRadius})) {
-                        e->markedForDeletion = true;
-                        entities[j].power++;     
-                    }
-                }                   
-            }
+                e->xForm.pos = e->xForm.pos + vec2{0, -1} * (fallSpeed * deltaSeconds);          
+            } break;
         }
     }
     
     u32 i = 0;
-    while (i < *entityCount) {
-        if (entities[i].markedForDeletion) {
-            entities[i] = entities[(*entityCount) - 1];
-            (*entityCount)--;
+    while (i < buffer->entityCount) {
+        if (buffer->entries[i].markedForDeletion) {
+            buffer->entries[i] = buffer->entries[(buffer->entityCount) - 1];
+            (buffer->entityCount)--;
         }
         else{ 
             i++;
@@ -226,7 +303,7 @@ struct key {
 
 struct input {
     union {
-        key keys[5];
+        key keys[6];
         
         struct {
             key upKey;
@@ -234,8 +311,40 @@ struct input {
             key leftKey;
             key rightKey;
             key fireKey;
+            key enterKey;
         };
     };
+};
+
+bool wasPressed(key k) {
+    return (k.isPressed && k.hasChanged);
+}
+
+void initGame (game_state *gameState, entity **player, entity **boss) {
+    gameState->entities.entityCount = 0;
+    
+    *player = nextEntity(&gameState->entities); 
+    (*player)->xForm = TRANSFORM_IDENTITY;
+    (*player)->xForm.scale = 0.1f;
+    (*player)->collisionRadius = (*player)->xForm.scale * 0.5;
+    (*player)->maxHp = 1;
+    (*player)->hp = (*player)->maxHp;
+    (*player)->player.power = 1;
+    (*player)->type = Entity_Type_Player;
+    (*player)->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
+    (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};	
+    
+     *boss  = nextEntity(&gameState->entities);    
+    (*boss)->xForm.pos = vec2{0.0f, 0.5f};  
+    (*boss)->xForm.rotation = 0.0f;
+    (*boss)->xForm.scale = 0.7f;
+    (*boss)->collisionRadius = (*boss)->xForm.scale * 0.5;
+    (*boss)->maxHp = 500;
+    (*boss)->hp = (*boss)->maxHp;
+    (*boss)->type = Entity_Type_Boss;
+    (*boss)->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+    (*boss)->blinkDuration = 0.1f;
+    (*boss)->blinkTime = 0.0f;
 };
 
 int main(int argc, char* argv[]) {
@@ -272,6 +381,7 @@ int main(int argc, char* argv[]) {
     ui_context ui = {};
     
     bool doContinue = true;
+    
     u64 ticks = SDL_GetPerformanceFrequency();
     u64 lastTime = SDL_GetPerformanceCounter();
     f32 scaleAlpha = 0;
@@ -283,58 +393,15 @@ int main(int argc, char* argv[]) {
     texture bulletMaxPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
     texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
   
-    entity entities[100];
-    u32 entityCount = 0;        
+    entity _entitieEntries[100];
+    game_state gameState = {};
+    gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
+    entity *player, *boss;
     
-    entity *player = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount); 
-    player->xForm = TRANSFORM_IDENTITY;
-    player->xForm.scale = 0.1f;
-    player->collisionRadius = player->xForm.scale * 0.5;
-    player->maxHp = 1;
-    player->hp = player->maxHp;
-    player->power = 1;
-    player->type = Entity_Type_Player;
-    player->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
-    player->relativeDrawCenter = vec2 {0.5f, 0.4f};	
-    
-    auto boss  = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);    
-    boss->xForm.pos = vec2{0.0f, 0.5f};  
-    boss->xForm.rotation = 0.0f;
-    boss->xForm.scale = 0.7f;
-    boss->collisionRadius = boss->xForm.scale * 0.5;
-    boss->maxHp = 500;
-    boss->hp = boss->maxHp;
-    boss->type = Entity_Type_Boss;
-    boss->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-    boss->blinkDuration = 0.1f;
-    
-    auto fly = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
-    fly->xForm.pos = vec2{-0.7f, 0.3f};  
-    fly->xForm.rotation = 0.0f;
-    fly->xForm.scale = 0.09f;
-    fly->collisionRadius = fly->xForm.scale * 0.65;
-    fly->maxHp = 20;
-    fly->hp = fly->maxHp;
-    fly->type = Entity_Type_Fly;
-    fly->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-    fly->fly.flipInterval = 1.5f;
-    fly->fly.flipCountdown = fly->fly.flipInterval;
-    fly->fly.velocity = vec2{1.0f, 0.1f};    
-    fly->relativeDrawCenter = vec2 {0.5f, 0.44f};
-    fly->blinkDuration = 0.1f;
-        
-//    auto powerup = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
-//    powerup->xForm.pos = vec2{-0.5f, 0.3f};  
-//    powerup->xForm.rotation = 0.0f;
-//    powerup->xForm.scale = 0.02f;
-//    powerup->collisionRadius = powerup->xForm.scale * 1.3f;
-//    powerup->type = Entity_Type_Powerup;
-//    powerup->collisionTypeMask = FLAG(Entity_Type_Player); 
-//    powerup->relativeDrawCenter = vec2 {0.5f, 0.5f};
+    initGame(&gameState, &player, &boss);
+            
     //timer init
     
-    for (u32 i = 0; i < entityCount; i++)
-        entities[i].blinkTime = 0.0f;
     f32 bulletSpawnCooldown = 0;
 	
     f32 chickenSpawnCooldown = 5.0f;
@@ -394,6 +461,11 @@ int main(int argc, char* argv[]) {
                             gameInput.fireKey.isPressed = (event.key.type == SDL_KEYDOWN);
                             gameInput.fireKey.hasChanged = true;
                         } break;
+                        
+                        case SDL_SCANCODE_RETURN: {
+                            gameInput.enterKey.isPressed = (event.key.type == SDL_KEYDOWN);
+                            gameInput.enterKey.hasChanged = true;
+                        } break;
                     }
                 } break;
             }
@@ -416,7 +488,7 @@ int main(int argc, char* argv[]) {
         
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        
+    
         
         frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
@@ -424,101 +496,113 @@ int main(int argc, char* argv[]) {
             frameRateHistogram.currentIndex = 0;
         }
         
-        //bullet movement        
-        if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
-              
-        vec2 direction = {};
-        f32 speed = 1.0f;
-        
-        update(entities, &entityCount, deltaSeconds);
-        
-        //player movement
-        if (gameInput.leftKey.isPressed) {
-            direction.x -= 1;
-            //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
-        }
-        
-        if (gameInput.rightKey.isPressed) {
-            direction.x += 1; 
-            //player->xForm.rotation += 0.5f * PI * deltaSeconds;
-        }
-        
-        if (gameInput.upKey.isPressed) {
-            direction.y += 1; 
-        }
-        
-        if (gameInput.downKey.isPressed) {
-            direction.y -= 1; 
-        }
-        direction = normalizeOrZero(direction);
-        direction = direction * (speed * deltaSeconds);
-        player->xForm.pos = player->xForm.pos + direction;
-        
-        {
-#if 0
-            f32 rotation = asin((enemies[0].xForm.pos.x - player->xForm.pos.x) / length(enemies[0].xForm.pos - player->xForm.pos));
-            if (enemies[0].xForm.pos.y < player->xForm.pos.y) {
-                rotation = rotation - PI;
+        auto entities = &gameState.entities;
+        if(gameState.isGameover) {
+            if (wasPressed(gameInput.enterKey)) {
+                initGame(&gameState, &player, &boss);
+                gameState.isGameover = false;
+                continue;
             }
-            else {
-                rotation = 2 * PI - rotation;
-            }
+            player->xForm.rotation += 2 * PI * deltaSeconds;
             
-            player->xForm.rotation = rotation;
-            
-#else
-            player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
-            
-            
-#endif
         }
-    {
-         chickenSpawnCooldown -= deltaSeconds;
-    
-        if(chickenSpawnCooldown <= 0) {
-            //unleash the chicken!
-            entity *chicken = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
+        else {
 
-            if (chicken != NULL) {               
-                chicken->xForm.rotation = 0.0f;
-                chicken->xForm.scale = 0.09f;
-                chicken->collisionRadius = chicken->xForm.scale * 0.65;
-                chicken->maxHp = 10;
-                chicken->hp = chicken->maxHp;
-                chicken->type = Entity_Type_Fly;
-                chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-                chicken->fly.flipInterval = 1.5f;
-                chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
-                chicken->fly.velocity = vec2{1.0f, 0.1f};    
-                chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randMinusOneToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
-                chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
-                chicken->blinkDuration = 0.1f;
-            }        
-            chickenSpawnCooldown += 1.0f;
-        }
-    }
-        
-        if(gameInput.fireKey.isPressed) {
-            if ((bulletSpawnCooldown <= 0)) {
-                entity *bullet = nextEntity(ARRAY_WITH_COUNT(entities), &entityCount);
-                
-                if (bullet != NULL) {
-                    bullet->xForm.pos = player->xForm.pos;
-                    bullet->xForm.scale = 0.2f;
-                    bullet->xForm.rotation = 0;
-                    bullet->collisionRadius = bullet->xForm.scale * 0.2;
-                    bullet->type = Entity_Type_Bullet;
-                    bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
-                    bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
-                    
-                    bullet->power = (player->power / 20) + 1;
-                    bullet->power = MIN(bullet->power, 3);
-                    
-                    bulletSpawnCooldown += 0.05f;
+            //bullet movement        
+            if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
+
+            vec2 direction = {};
+            f32 speed = 1.0f;
+
+            update(&gameState, deltaSeconds);
+
+            //player movement
+            if (gameInput.leftKey.isPressed) {
+                direction.x -= 1;
+                //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
+            }
+
+            if (gameInput.rightKey.isPressed) {
+                direction.x += 1; 
+                //player->xForm.rotation += 0.5f * PI * deltaSeconds;
+            }
+
+            if (gameInput.upKey.isPressed) {
+                direction.y += 1; 
+            }
+
+            if (gameInput.downKey.isPressed) {
+                direction.y -= 1; 
+            }
+            direction = normalizeOrZero(direction);
+            direction = direction * (speed * deltaSeconds);
+            player->xForm.pos = player->xForm.pos + direction;
+
+            {
+    #if 0
+                f32 rotation = asin((enemies[0].xForm.pos.x - player->xForm.pos.x) / length(enemies[0].xForm.pos - player->xForm.pos));
+                if (enemies[0].xForm.pos.y < player->xForm.pos.y) {
+                    rotation = rotation - PI;
+                }
+                else {
+                    rotation = 2 * PI - rotation;
+                }
+
+                player->xForm.rotation = rotation;
+
+    #else
+                player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
+
+
+    #endif
+            }
+            {
+                 chickenSpawnCooldown -= deltaSeconds;
+
+                if(chickenSpawnCooldown <= 0) {
+                    //unleash the chicken!
+                    entity *chicken = nextEntity(entities);
+
+                    if (chicken != NULL) {               
+                        chicken->xForm.rotation = 0.0f;
+                        chicken->xForm.scale = 0.09f;
+                        chicken->collisionRadius = chicken->xForm.scale * 0.65;
+                        chicken->maxHp = 10;
+                        chicken->hp = chicken->maxHp;
+                        chicken->type = Entity_Type_Fly;
+                        chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+                        chicken->fly.flipInterval = 1.5f;
+                        chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
+                        chicken->fly.velocity = vec2{1.0f, 0.1f};    
+                        chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randMinusOneToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
+                        chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
+                        chicken->blinkDuration = 0.1f;
+                    }        
+                    chickenSpawnCooldown += 1.0f;
                 }
             }
-        }
-        
+
+            if(gameInput.fireKey.isPressed) {
+                if ((bulletSpawnCooldown <= 0)) {
+                    entity *bullet = nextEntity(entities);
+
+                    if (bullet != NULL) {
+                        bullet->xForm.pos = player->xForm.pos;
+                        bullet->xForm.scale = 0.2f;
+                        bullet->xForm.rotation = 0;
+                        bullet->collisionRadius = bullet->xForm.scale * 0.2;
+                        bullet->type = Entity_Type_Bullet;
+                        bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
+                        bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
+
+                        bullet->bullet.damage = (player->player.power / 20) + 1;
+                        bullet->bullet.damage = MIN(bullet->bullet.damage, 3);
+
+                        bulletSpawnCooldown += 0.05f;
+                    }
+                }
+            }
+        } 
         // render
         
         
@@ -536,18 +620,18 @@ int main(int argc, char* argv[]) {
         
         drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, whiteColor, player->relativeDrawCenter);
         
-        for (u32 i = 0; i < entityCount; i++) {
-            switch (entities[i].type) {
+        for (u32 i = 0; i < entities->entityCount; i++) {
+            switch (entities->entries[i].type) {
                 
                 case Entity_Type_Bullet: {
-                    if (entities[i].power == 1) {
-                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities[i].relativeDrawCenter);
+                    if (entities->entries[i].bullet.damage == 1) {
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities->entries[i].relativeDrawCenter);
                     } 
-                    else if (entities[i].power == 2){
-                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletPoweredUpTexture, whiteColor, entities[i].relativeDrawCenter);  
+                    else if (entities->entries[i].bullet.damage == 2){
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletPoweredUpTexture, whiteColor, entities->entries[i].relativeDrawCenter);  
                     }
                     else {
-                        drawTexturedQuad(entities[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, whiteColor, entities[i].relativeDrawCenter);
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, whiteColor, entities->entries[i].relativeDrawCenter);
                     }
                 } break;
                 
@@ -555,17 +639,17 @@ int main(int argc, char* argv[]) {
                 } break;
                 
                 case Entity_Type_Fly: {
-                    if (entities[i].blinkTime <= 0) {
-			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, whiteColor, entities[i].relativeDrawCenter); 
+                    if (entities->entries[i].blinkTime <= 0) {
+			drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, whiteColor, entities->entries[i].relativeDrawCenter); 
                     } 
                     else {
-			color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities[i].blinkTime / entities[i].blinkDuration); 
-			drawTexturedQuad(entities[i].xForm, heightOverWidth, flyTexture, blinkColor, entities[i].relativeDrawCenter);          
+			color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
+			drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, blinkColor, entities->entries[i].relativeDrawCenter);          
                     }   
                 } break;
                 
                 case Entity_Type_Powerup: {
-                    drawTexturedQuad(entities[i].xForm, heightOverWidth, powerupTexture, whiteColor, entities[i].relativeDrawCenter);
+                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, powerupTexture, whiteColor, entities->entries[i].relativeDrawCenter);
                 } break;
             }    
         }
@@ -575,9 +659,9 @@ int main(int argc, char* argv[]) {
         
         drawHistogram(frameRateHistogram);
         
-        for (u32 i = 0; i < entityCount; i++) {
-            transform collisionTransform = entities[i].xForm;
-            collisionTransform.scale = 2 * entities[i].collisionRadius;
+        for (u32 i = 0; i < entities->entityCount; i++) {
+            transform collisionTransform = entities->entries[i].xForm;
+            collisionTransform.scale = 2 * entities->entries[i].collisionRadius;
             drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
         }
         

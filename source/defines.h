@@ -7,6 +7,14 @@
 #define f32 float
 #define s32 int32_t 
 
+#define assert(condition) { \
+    if (!(condition)) {\
+        printf("assert failed: %s \n", #condition); \
+        *((u32 *) NULL) = 123; \
+    } \
+}
+ 
+
 #define MAX(a,b) (a > b ? a : b)
 #define MIN(a,b) (a < b ? a : b)
 
@@ -16,7 +24,6 @@
 #define FLAG(bit) (1 << bit)
 
 #define PI 3.14159265359
-
 
 struct vec2 {
     f32 x, y;
