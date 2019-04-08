@@ -47,10 +47,17 @@ enum entity_type{
     Entity_Type_Fly,    
     Entity_Type_Bullet,
     Entity_Type_Powerup,
-
+    
     
     Entity_Type_Count
 };
+
+const f32 Fly_Min_Fire_Interval = 0.8f;
+const f32 Fly_Max_Fire_Interval = 1.7f;
+
+const f32 Powerup_Collect_Radius = 0.1f;
+const f32 Powerup_Magnet_Speed   = 0.5f;
+
 
 struct entity {
     transform xForm;
@@ -65,8 +72,9 @@ struct entity {
     
     union {
         struct {
-           f32 flipCountdown, flipInterval;
-           vec2 velocity;
+            f32 flipCountdown, flipInterval;
+            vec2 velocity;
+            f32 fireCountdown;
         } fly;
         
         struct {
@@ -122,15 +130,15 @@ void update(game_state *state, f32 deltaSeconds){
     
     for(u32 i = 0; i < buffer->entityCount; i++) {
         bool doBreak = false;
-                
+        
         for (u32 j = i + 1; j < buffer->entityCount; j++){
-                    
+            
             if (!(buffer->entries[i].collisionTypeMask & FLAG(buffer->entries[j].type)))
                 continue;
-
+            
             if (!(buffer->entries[j].collisionTypeMask & FLAG(buffer->entries[i].type)))
                 continue;
-
+            
             if (areIntersecting(circle{buffer->entries[i].xForm.pos, buffer->entries[i].collisionRadius}, circle{buffer->entries[j].xForm.pos, buffer->entries[j].collisionRadius})) 
             {
                 if (collisionCount >= ARRAY_COUNT(collisions)) {
@@ -163,11 +171,20 @@ void update(game_state *state, f32 deltaSeconds){
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Powerup)): {
                 auto player = current->entities[0];
                 auto powerup = current->entities[1];
-                
                 assert((player->type == Entity_Type_Player) && (powerup->type == Entity_Type_Powerup));
-                                
-                powerup->markedForDeletion = true;
-                player->player.power++;
+                
+                
+                auto distance = player->xForm.pos - powerup->xForm.pos;
+                
+                if (lengthSquared(distance) <= Powerup_Collect_Radius * Powerup_Collect_Radius)
+                {
+                    powerup->markedForDeletion = true;
+                    player->player.power++;
+                }
+                else
+                {
+                    powerup->xForm.pos = powerup->xForm.pos + normalizeOrZero(distance) * (Powerup_Magnet_Speed * deltaSeconds);
+                }
                 
             } break;
             
@@ -176,7 +193,7 @@ void update(game_state *state, f32 deltaSeconds){
                 auto bullet = current->entities[1];
                 
                 assert((fly->type == Entity_Type_Fly) && (bullet->type == Entity_Type_Bullet));
-                                 
+                
                 bullet->markedForDeletion = true;
                 fly->hp -= bullet->bullet.damage;  
                 fly->blinkTime = fly->blinkDuration;
@@ -188,13 +205,14 @@ void update(game_state *state, f32 deltaSeconds){
                 auto bullet = current->entities[1];
                 
                 assert((boss->type == Entity_Type_Boss) && (bullet->type == Entity_Type_Bullet));
-                                 
+                
                 bullet->markedForDeletion = true;
                 boss->hp -= bullet->bullet.damage;
                 boss->blinkTime = boss->blinkDuration;
-            
+                
             } break;   
             
+            case (FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Player)): 
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Boss)): 
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Fly)): {
                 
@@ -202,10 +220,10 @@ void update(game_state *state, f32 deltaSeconds){
                 auto enemy = current->entities[1];
                 
                 assert(player->type == Entity_Type_Player);
-                                                 
+                
                 state->isGameover = true;
                 return;
-            
+                
             } break;  
         }
     }
@@ -224,8 +242,8 @@ void update(game_state *state, f32 deltaSeconds){
                 //e->xForm.pos.y += speed * deltaSeconds;
                 f32 speed = 1.0f; 
                 e->xForm.pos = e->xForm.pos + dir * (speed * deltaSeconds);
-               
-                if (e->xForm.pos.y >= 1) {
+                
+                if (ABS(e->xForm.pos.y) >= 1) {
                     e->markedForDeletion = true;
                 }                               
             } break;
@@ -233,15 +251,19 @@ void update(game_state *state, f32 deltaSeconds){
             case Entity_Type_Fly:{
                 if (e->hp <= 0) {
                     e->markedForDeletion = true;
-
+                    
                     entity *powerup = nextEntity(buffer);
-                    powerup->xForm.pos = e->xForm.pos;  
-                    powerup->xForm.rotation = 0.0f;
-                    powerup->xForm.scale = 0.02f;
-                    powerup->collisionRadius = powerup->xForm.scale * 1.3f;
-                    powerup->type = Entity_Type_Powerup;
-                    powerup->collisionTypeMask = FLAG(Entity_Type_Player); 
-                    powerup->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                    
+                    if (powerup)
+                    {
+                        powerup->xForm.pos = e->xForm.pos;  
+                        powerup->xForm.rotation = 0.0f;
+                        powerup->xForm.scale = 0.02f;
+                        powerup->collisionRadius = Powerup_Collect_Radius * 3;
+                        powerup->type = Entity_Type_Powerup;
+                        powerup->collisionTypeMask = FLAG(Entity_Type_Player); 
+                        powerup->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                    }
                 } 
                 
                 f32 t = deltaSeconds;
@@ -255,6 +277,24 @@ void update(game_state *state, f32 deltaSeconds){
                 
                 e->fly.flipCountdown -= deltaSeconds;
                 e->xForm.pos = e->xForm.pos + e->fly.velocity * t;
+                
+                e->fly.fireCountdown -= deltaSeconds;
+                if (e->fly.fireCountdown <= 0)
+                {
+                    e->fly.fireCountdown += lerp(Fly_Min_Fire_Interval, Fly_Max_Fire_Interval, randZeroToOne());
+                    
+                    auto bullet = nextEntity(buffer);
+                    if (bullet)
+                    {
+                        bullet->type = Entity_Type_Bullet;
+                        bullet->collisionTypeMask |= FLAG(Entity_Type_Player);
+                        bullet->xForm.pos = e->xForm.pos;  
+                        bullet->xForm.rotation = lerp(PI * 0.75f, PI * 1.25f, randZeroToOne()); // points downwards
+                        bullet->xForm.scale = 0.2f;
+                        bullet->collisionRadius = bullet->xForm.scale * 0.2;
+                        bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                    }
+                }
                 
                 if (e->blinkTime > 0) e->blinkTime -= deltaSeconds;
             } break;
@@ -329,12 +369,12 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*player)->collisionRadius = (*player)->xForm.scale * 0.5;
     (*player)->maxHp = 1;
     (*player)->hp = (*player)->maxHp;
-    (*player)->player.power = 1;
+    (*player)->player.power = 0;
     (*player)->type = Entity_Type_Player;
     (*player)->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
     (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};	
     
-     *boss  = nextEntity(&gameState->entities);    
+    *boss  = nextEntity(&gameState->entities);    
     (*boss)->xForm.pos = vec2{0.0f, 0.5f};  
     (*boss)->xForm.rotation = 0.0f;
     (*boss)->xForm.scale = 0.7f;
@@ -346,6 +386,13 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*boss)->blinkDuration = 0.1f;
     (*boss)->blinkTime = 0.0f;
 };
+
+void drawBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, color emptyColor, color fullColor) {
+    
+    uiRect(ui, x, y, width, height, emptyColor);
+    uiRect(ui, x, y, width * CLAMP(percentage, 0, 1), height, fullColor);
+    
+}
 
 int main(int argc, char* argv[]) {
     srand (time(NULL));
@@ -392,14 +439,14 @@ int main(int argc, char* argv[]) {
     texture bulletPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
     texture bulletMaxPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
     texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
-  
+    
     entity _entitieEntries[100];
     game_state gameState = {};
     gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
     entity *player, *boss;
     
     initGame(&gameState, &player, &boss);
-            
+    
     //timer init
     
     f32 bulletSpawnCooldown = 0;
@@ -488,7 +535,7 @@ int main(int argc, char* argv[]) {
         
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-    
+        
         
         frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
@@ -507,39 +554,39 @@ int main(int argc, char* argv[]) {
             
         }
         else {
-
+            
             //bullet movement        
             if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
-
+            
             vec2 direction = {};
             f32 speed = 1.0f;
-
+            
             update(&gameState, deltaSeconds);
-
+            
             //player movement
             if (gameInput.leftKey.isPressed) {
                 direction.x -= 1;
                 //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
             }
-
+            
             if (gameInput.rightKey.isPressed) {
                 direction.x += 1; 
                 //player->xForm.rotation += 0.5f * PI * deltaSeconds;
             }
-
+            
             if (gameInput.upKey.isPressed) {
                 direction.y += 1; 
             }
-
+            
             if (gameInput.downKey.isPressed) {
                 direction.y -= 1; 
             }
             direction = normalizeOrZero(direction);
             direction = direction * (speed * deltaSeconds);
             player->xForm.pos = player->xForm.pos + direction;
-
+            
             {
-    #if 0
+#if 0
                 f32 rotation = asin((enemies[0].xForm.pos.x - player->xForm.pos.x) / length(enemies[0].xForm.pos - player->xForm.pos));
                 if (enemies[0].xForm.pos.y < player->xForm.pos.y) {
                     rotation = rotation - PI;
@@ -547,22 +594,22 @@ int main(int argc, char* argv[]) {
                 else {
                     rotation = 2 * PI - rotation;
                 }
-
+                
                 player->xForm.rotation = rotation;
-
-    #else
+                
+#else
                 player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
-
-
-    #endif
+                
+                
+#endif
             }
             {
-                 chickenSpawnCooldown -= deltaSeconds;
-
+                chickenSpawnCooldown -= deltaSeconds;
+                
                 if(chickenSpawnCooldown <= 0) {
                     //unleash the chicken!
                     entity *chicken = nextEntity(entities);
-
+                    
                     if (chicken != NULL) {               
                         chicken->xForm.rotation = 0.0f;
                         chicken->xForm.scale = 0.09f;
@@ -574,18 +621,18 @@ int main(int argc, char* argv[]) {
                         chicken->fly.flipInterval = 1.5f;
                         chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
                         chicken->fly.velocity = vec2{1.0f, 0.1f};    
-                        chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randMinusOneToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
+                        chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randZeroToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
                         chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
                         chicken->blinkDuration = 0.1f;
                     }        
                     chickenSpawnCooldown += 1.0f;
                 }
             }
-
+            
             if(gameInput.fireKey.isPressed) {
                 if ((bulletSpawnCooldown <= 0)) {
                     entity *bullet = nextEntity(entities);
-
+                    
                     if (bullet != NULL) {
                         bullet->xForm.pos = player->xForm.pos;
                         bullet->xForm.scale = 0.2f;
@@ -594,10 +641,10 @@ int main(int argc, char* argv[]) {
                         bullet->type = Entity_Type_Bullet;
                         bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
                         bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
-
+                        
                         bullet->bullet.damage = (player->player.power / 20) + 1;
                         bullet->bullet.damage = MIN(bullet->bullet.damage, 3);
-
+                        
                         bulletSpawnCooldown += 0.05f;
                     }
                 }
@@ -607,11 +654,11 @@ int main(int argc, char* argv[]) {
         
         
         if (boss->blinkTime <= 0) {
-                drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
+            drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
         } 
         else {
-                color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
-                drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
+            color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
+            drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
         }
         
         glEnable(GL_TEXTURE_2D);
@@ -640,11 +687,11 @@ int main(int argc, char* argv[]) {
                 
                 case Entity_Type_Fly: {
                     if (entities->entries[i].blinkTime <= 0) {
-			drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, whiteColor, entities->entries[i].relativeDrawCenter); 
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, whiteColor, entities->entries[i].relativeDrawCenter); 
                     } 
                     else {
-			color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
-			drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, blinkColor, entities->entries[i].relativeDrawCenter);          
+                        color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, blinkColor, entities->entries[i].relativeDrawCenter);          
                     }   
                 } break;
                 
@@ -671,8 +718,11 @@ int main(int argc, char* argv[]) {
         drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
         drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
-        uiRect(&ui, 20, ui.height - 80, (ui.width - 40), 40, color{1.0f, 0.0f, 0.0f, 1.0f});
-        uiRect(&ui, 20, ui.height - 80, (ui.width - 40) * boss->hp / boss->maxHp, 40, color{0.0f, 1.0f, 0.0f, 1.0f});
+        
+        drawBar(&ui, 20, ui.height - 60, ui.width - 40,40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        
+        drawBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        
         
         // render end
         

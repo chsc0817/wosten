@@ -13,10 +13,11 @@
         *((u32 *) NULL) = 123; \
     } \
 }
- 
 
+#define ABS(a)   (a >= 0 ? a : -a)
 #define MAX(a,b) (a > b ? a : b)
 #define MIN(a,b) (a < b ? a : b)
+#define CLAMP(a, min, max) ((min > a) ? min : (max < a ? max : a))
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
 #define ARRAY_WITH_COUNT(array) array, ARRAY_COUNT(array)
