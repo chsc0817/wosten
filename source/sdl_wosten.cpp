@@ -46,6 +46,7 @@ enum entity_type{
     Entity_Type_Boss,
     Entity_Type_Fly,    
     Entity_Type_Bullet,
+    Entity_Type_Bomb,
     Entity_Type_Powerup,
     
     
@@ -78,7 +79,8 @@ struct entity {
         } fly;
         
         struct {
-            u32 power;   
+            u32 power;
+            u32 bombs;
         } player;
         
         struct {
@@ -112,6 +114,7 @@ struct collision {
 struct game_state {
     entity_buffer entities;
     bool isGameover;    
+    texture bombTexture;
 };
 
 
@@ -212,6 +215,15 @@ void update(game_state *state, f32 deltaSeconds){
                 
             } break;   
             
+             case (FLAG(Entity_Type_Bomb) | FLAG(Entity_Type_Bullet)): {
+                auto bullet = current->entities[0];
+                auto bomb = current->entities[1];
+                
+                assert((bomb->type == Entity_Type_Bomb) && (bullet->type == Entity_Type_Bullet));
+                
+                bullet->markedForDeletion = true;               
+            } break;
+            
             case (FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Player)): 
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Boss)): 
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Fly)): {
@@ -246,6 +258,15 @@ void update(game_state *state, f32 deltaSeconds){
                 if (ABS(e->xForm.pos.y) >= 1) {
                     e->markedForDeletion = true;
                 }                               
+            } break;
+            
+            case Entity_Type_Bomb: {
+                e->collisionRadius += deltaSeconds * 3.0f;
+                e->xForm.scale = e->collisionRadius * 3.0f / (state->bombTexture.height * Default_Texel_Scale);
+                
+                if (e->collisionRadius > 6.0f) {
+                    e->markedForDeletion = true;
+                }
             } break;
             
             case Entity_Type_Fly:{
@@ -287,7 +308,7 @@ void update(game_state *state, f32 deltaSeconds){
                     if (bullet)
                     {
                         bullet->type = Entity_Type_Bullet;
-                        bullet->collisionTypeMask |= FLAG(Entity_Type_Player);
+                        bullet->collisionTypeMask |= FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bomb);
                         bullet->xForm.pos = e->xForm.pos;  
                         bullet->xForm.rotation = lerp(PI * 0.75f, PI * 1.25f, randZeroToOne()); // points downwards
                         bullet->xForm.scale = 0.2f;
@@ -343,7 +364,7 @@ struct key {
 
 struct input {
     union {
-        key keys[6];
+        key keys[8];
         
         struct {
             key upKey;
@@ -351,7 +372,9 @@ struct input {
             key leftKey;
             key rightKey;
             key fireKey;
+            key bombKey;
             key enterKey;
+            key slowMovementKey;
         };
     };
 };
@@ -370,11 +393,12 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*player)->maxHp = 1;
     (*player)->hp = (*player)->maxHp;
     (*player)->player.power = 0;
+    (*player)->player.bombs = 3;
     (*player)->type = Entity_Type_Player;
     (*player)->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
     (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};	
     
-    *boss  = nextEntity(&gameState->entities);    
+     *boss  = nextEntity(&gameState->entities);    
     (*boss)->xForm.pos = vec2{0.0f, 0.5f};  
     (*boss)->xForm.rotation = 0.0f;
     (*boss)->xForm.scale = 0.7f;
@@ -387,20 +411,14 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*boss)->blinkTime = 0.0f;
 };
 
-void drawBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, color emptyColor, color fullColor) {
-    
-    uiRect(ui, x, y, width, height, emptyColor);
-    uiRect(ui, x, y, width * CLAMP(percentage, 0, 1), height, fullColor);
-    
-}
-
 int main(int argc, char* argv[]) {
     srand (time(NULL));
     
     SDL_Window *window;                    // Declare a pointer
     
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL2
-    
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     // Create an application window with the following settings:
     window = SDL_CreateWindow(
         "wosten",                  // window title
@@ -420,6 +438,7 @@ int main(int argc, char* argv[]) {
     }
     
     // The window is open: could enter program loop here (see SDL_PollEvent())
+
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
     
     //init
@@ -438,11 +457,13 @@ int main(int argc, char* argv[]) {
     texture bulletTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_014.png");  
     texture bulletPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
     texture bulletMaxPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
+    texture bombCountTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_021.png");
     texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
     
     entity _entitieEntries[100];
     game_state gameState = {};
     gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
+    gameState.bombTexture = loadTexture("data/Kenney/particlePackCircle.png");
     entity *player, *boss;
     
     initGame(&gameState, &player, &boss);
@@ -509,9 +530,19 @@ int main(int argc, char* argv[]) {
                             gameInput.fireKey.hasChanged = true;
                         } break;
                         
+                        case SDL_SCANCODE_L: {
+                            gameInput.bombKey.isPressed = (event.key.type == SDL_KEYDOWN);
+                            gameInput.bombKey.hasChanged = true;    
+                        } break;
+                        
                         case SDL_SCANCODE_RETURN: {
                             gameInput.enterKey.isPressed = (event.key.type == SDL_KEYDOWN);
                             gameInput.enterKey.hasChanged = true;
+                        } break;
+                        
+                        case SDL_SCANCODE_LSHIFT: {
+                            gameInput.slowMovementKey.isPressed = (event.key.type == SDL_KEYDOWN);
+                            gameInput.slowMovementKey.hasChanged = true;
                         } break;
                     }
                 } break;
@@ -527,6 +558,8 @@ int main(int argc, char* argv[]) {
         SDL_GetWindowSize(window, &width, &height);
         
         f32 heightOverWidth = height / (f32)width; 
+        f32 worldWidthHalf = 1/ heightOverWidth;
+        
         glViewport(0, 0, width, height);
         ui.width = width;
         ui.height = height;
@@ -535,7 +568,7 @@ int main(int argc, char* argv[]) {
         
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        
+               
         
         frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
@@ -581,9 +614,20 @@ int main(int argc, char* argv[]) {
             if (gameInput.downKey.isPressed) {
                 direction.y -= 1; 
             }
-            direction = normalizeOrZero(direction);
-            direction = direction * (speed * deltaSeconds);
-            player->xForm.pos = player->xForm.pos + direction;
+            
+            if (gameInput.slowMovementKey.isPressed) {
+                speed = speed * 0.5f;
+            }
+            
+            direction = normalizeOrZero(direction);            
+            player->xForm.pos = player->xForm.pos + direction * (speed * deltaSeconds);
+            
+            player->xForm.pos.y = CLAMP(player->xForm.pos.y , -1.0f + player->collisionRadius, 1.0f - player->collisionRadius);
+            
+            // worldWidth = windowWidth / windowHeight * worldHeight 
+            // worldHeight = 2 (from -1 to 1)               
+            
+            player->xForm.pos.x = CLAMP(player->xForm.pos.x, -worldWidthHalf + player->collisionRadius, worldWidthHalf - player->collisionRadius);
             
             {
 #if 0
@@ -639,7 +683,7 @@ int main(int argc, char* argv[]) {
                         bullet->xForm.rotation = 0;
                         bullet->collisionRadius = bullet->xForm.scale * 0.2;
                         bullet->type = Entity_Type_Bullet;
-                        bullet->collisionTypeMask = (1 << Entity_Type_Boss) | (1 << Entity_Type_Fly);
+                        bullet->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly);
                         bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
                         
                         bullet->bullet.damage = (player->player.power / 20) + 1;
@@ -647,6 +691,25 @@ int main(int argc, char* argv[]) {
                         
                         bulletSpawnCooldown += 0.05f;
                     }
+                }
+            }
+            
+            if(wasPressed(gameInput.bombKey)) {
+                if (player->player.bombs > 0) {
+                
+                    entity *bomb = nextEntity(entities);
+
+                     if (bomb != NULL) {
+                        bomb->xForm.pos = player->xForm.pos;
+                        bomb->collisionRadius = 0.1f;
+                        bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_Texel_Scale);
+                        bomb->xForm.rotation = 0;
+                        bomb->type = Entity_Type_Bomb;
+                        bomb->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Bullet);
+                        bomb->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                        
+                        player->player.bombs--;
+                     }
                 }
             }
         } 
@@ -664,21 +727,23 @@ int main(int argc, char* argv[]) {
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        
-        drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, whiteColor, player->relativeDrawCenter);
+        glEnable(GL_ALPHA_TEST);
+        glAlphaFunc(GL_GEQUAL, 0.1f);
+        //draw player and all entities
+        drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, White_Color, player->relativeDrawCenter);
         
         for (u32 i = 0; i < entities->entityCount; i++) {
             switch (entities->entries[i].type) {
                 
                 case Entity_Type_Bullet: {
                     if (entities->entries[i].bullet.damage == 1) {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletTexture, whiteColor, entities->entries[i].relativeDrawCenter);
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletTexture, White_Color, entities->entries[i].relativeDrawCenter);
                     } 
                     else if (entities->entries[i].bullet.damage == 2){
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletPoweredUpTexture, whiteColor, entities->entries[i].relativeDrawCenter);  
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletPoweredUpTexture, White_Color, entities->entries[i].relativeDrawCenter);  
                     }
                     else {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, whiteColor, entities->entries[i].relativeDrawCenter);
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, White_Color, entities->entries[i].relativeDrawCenter);
                     }
                 } break;
                 
@@ -687,23 +752,33 @@ int main(int argc, char* argv[]) {
                 
                 case Entity_Type_Fly: {
                     if (entities->entries[i].blinkTime <= 0) {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, whiteColor, entities->entries[i].relativeDrawCenter); 
+                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, White_Color, entities->entries[i].relativeDrawCenter); 
                     } 
                     else {
-                        color blinkColor = lerp(whiteColor, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
+                        color blinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
                         drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, blinkColor, entities->entries[i].relativeDrawCenter);          
                     }   
                 } break;
                 
+                case Entity_Type_Bomb: {
+                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, gameState.bombTexture, color{randZeroToOne(), randZeroToOne(), randZeroToOne(), 1.0f}, entities->entries[i].relativeDrawCenter);    
+                } break;
+                
                 case Entity_Type_Powerup: {
-                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, powerupTexture, whiteColor, entities->entries[i].relativeDrawCenter);
+                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, powerupTexture, White_Color, entities->entries[i].relativeDrawCenter);
                 } break;
             }    
         }
         
+        //bomb count
+        glBindTexture(GL_TEXTURE_2D, bombCountTexture.object);        
+        for (int bomb = 0; bomb < player->player.bombs; bomb++){
+            uiRect(&ui, 20 + bomb * (bombCountTexture.width + 5), ui.height - 250, bombCountTexture.width, bombCountTexture.height, White_Color);
+        }
+        
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
-        
+        //debug framerate, hitbox and player/boss normalized x, y coordinates
         drawHistogram(frameRateHistogram);
         
         for (u32 i = 0; i < entities->entityCount; i++) {
@@ -711,18 +786,20 @@ int main(int argc, char* argv[]) {
             collisionTransform.scale = 2 * entities->entries[i].collisionRadius;
             drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
         }
-        
         drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
         drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        
         
         drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
         drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
         
-        drawBar(&ui, 20, ui.height - 60, ui.width - 40,40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        //boss hp
+        uiBar(&ui, 20, ui.height - 60, ui.width - 40,40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
-        drawBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
-        
+       
+        //player power
+        uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
         // render end
         

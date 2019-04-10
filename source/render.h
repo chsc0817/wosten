@@ -1,9 +1,9 @@
-
 #if !defined RENDER_H
 #define RENDER_H
 
 #include "defines.h"
 #include "SDL_opengl.h"
+
 
 //color
 union color {
@@ -14,7 +14,7 @@ union color {
    
 };
 
-const color whiteColor = {1.0f, 1.0f, 1.0f, 1.0f};
+const color White_Color = {1.0f, 1.0f, 1.0f, 1.0f};
 
 color lerp(color a, color b, f32 t) {
 	color result;
@@ -56,7 +56,9 @@ void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
     glEnd();
 }
 
-void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = whiteColor, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = 0.01f, f32 doFlip = 0.0f){
+const f32 Default_Texel_Scale = 0.01f;
+
+void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_Texel_Scale, f32 doFlip = 0.0f){
     
     vec2 texelSize = vec2{1.0f / fillTexture.width, 1.0f / fillTexture.height};
     vec2 quadSize = vec2{(f32) fillTexture.width, (f32) fillTexture.height} * texelScale;
@@ -103,7 +105,7 @@ void uiRect(ui_context *ui, s32 x, s32 y, s32 width, s32 height, color rectColor
     glColor4fv(rectColor.values);        
     
     glTexCoord2f(0, 1);  	
-	vec2 v = uiToGl(ui, x, y);
+    vec2 v = uiToGl(ui, x, y);
     glVertex2f(v.x, v.y);
     
     glTexCoord2f(1, 1);  	
@@ -119,6 +121,13 @@ void uiRect(ui_context *ui, s32 x, s32 y, s32 width, s32 height, color rectColor
     glVertex2f(v.x, v.y);
 	
 	glEnd();
+}
+
+void uiBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, color emptyColor, color fullColor) {
+    
+    uiRect(ui, x, y, width, height, emptyColor);
+    uiRect(ui, x, y, width * CLAMP(percentage, 0, 1), height, fullColor);
+    
 }
 
 void drawCircle(transform xForm, f32 heightOverWidth, color fillColor = {0.7f, 0.0f, 0.0f, 1.0f}, bool isFilled = true, u32 n = 16) {
@@ -170,7 +179,23 @@ texture loadTexture(const char *path){
     
     glGenTextures(1, &result.object);
     glBindTexture(GL_TEXTURE_2D, result.object);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSurface->w, textureSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureSurface->pixels);
+    
+    switch(textureSurface->format->BytesPerPixel) {
+        case 1: {
+            for (s32 i = 0; i < textureSurface->w * textureSurface->h; i++) {
+                ((u8*)textureSurface->pixels)[i] = 255 - ((u8*)textureSurface->pixels)[i];
+            }
+            
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSurface->w, textureSurface->h, 0, GL_RED, GL_UNSIGNED_BYTE, textureSurface->pixels);
+            GLint swizzleMask[] = {GL_ONE, GL_ONE, GL_ONE, GL_RED};
+            glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swizzleMask);           
+        } break;
+        
+        case 4: {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSurface->w, textureSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureSurface->pixels);
+        } break;
+    }
+   
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
