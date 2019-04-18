@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include "SDL_opengl.h"
 #include "SDL_image.h"
+#include "SDL_mixer.h"
+#define STBTT_assert
+#define STB_TRUETYPE_IMPLEMENTATION  // force following include to generate implementation
+#include "stb_truetype.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
@@ -51,6 +55,14 @@ enum entity_type{
     
     
     Entity_Type_Count
+};
+
+enum sfx {
+    Sfx_Death,
+    Sfx_Bomb,
+    Sfx_Shoot,
+    
+    Sfx_Count
 };
 
 const f32 Fly_Min_Fire_Interval = 0.8f;
@@ -124,6 +136,19 @@ f32 randZeroToOne(){
 
 f32 randMinusOneToOne(){
     return (randZeroToOne() * 2 - 1.0f);
+}
+
+
+Mix_Chunk *loadChunk(int sfxEnum) {
+    switch (sfxEnum) {
+        case Sfx_Death: return Mix_LoadWAV("data/Gravity Sound/Low Health.wav");
+        
+        case Sfx_Bomb: return Mix_LoadWAV("data/Gravity Sound/Level Up 4.wav");
+        
+        case Sfx_Shoot: return Mix_LoadWAV("data/Gravity Sound/Dropping Item 6.wav");
+        
+        default: return NULL;
+    }
 }
 
 void update(game_state *state, f32 deltaSeconds){    
@@ -234,6 +259,9 @@ void update(game_state *state, f32 deltaSeconds){
                 assert(player->type == Entity_Type_Player);
                 
                 state->isGameover = true;
+                Mix_FadeOutMusic(500);
+                Mix_HaltChannel(-1);
+                Mix_PlayChannel(0, loadChunk(Sfx_Death), 0);
                 return;
                 
             } break;  
@@ -379,6 +407,13 @@ struct input {
     };
 };
 
+struct glyph {
+    u32 code;
+    s32 drawXAdvance;
+    s32 drawXOffset, drawYOffset;
+    s32 x,y,width,height;    
+};
+
 bool wasPressed(key k) {
     return (k.isPressed && k.hasChanged);
 }
@@ -416,7 +451,7 @@ int main(int argc, char* argv[]) {
     
     SDL_Window *window;                    // Declare a pointer
     
-    SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL2
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);              // Initialize SDL2
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     // Create an application window with the following settings:
@@ -441,7 +476,34 @@ int main(int argc, char* argv[]) {
 
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
     
-    //init
+    //sound init
+    int mixInit = Mix_Init(MIX_INIT_MP3);
+    if(mixInit&MIX_INIT_MP3 != MIX_INIT_MP3) {
+        printf("Error initializing mix: %s \n", Mix_GetError());
+    }
+    
+    if (Mix_OpenAudio(MIX_DEFAULT_FREQUENCY, MIX_DEFAULT_FORMAT, 2, 4096)) {
+        printf("Error Mix_OpenAudio: %s \n", Mix_GetError());
+    }
+    Mix_Music *bgm;
+    bgm = Mix_LoadMUS("data/Gravity Sound/Gravity Sound - Rain Delay CC BY 4.0.mp3");
+    if(!bgm) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    }
+    
+    Mix_PlayMusic(bgm, -1);
+    Mix_VolumeMusic(30);
+    
+    //sfx
+    Mix_AllocateChannels(2);
+//    Mix_Chunk *oof = loadChunk(Sfx_Death);   
+    Mix_Chunk *sfxBomb = loadChunk(Sfx_Bomb);
+    Mix_Chunk *sfxShoot = loadChunk(Sfx_Shoot); 
+    
+    if(!sfxBomb || !sfxShoot) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    }
+    
     histogram frameRateHistogram = {};
     
     ui_context ui = {};
@@ -459,6 +521,39 @@ int main(int argc, char* argv[]) {
     texture bulletMaxPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
     texture bombCountTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_021.png");
     texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
+    
+    SDL_RWops* op = SDL_RWFromFile("C:/Windows/Fonts/bahnschrift.ttf", "rb");
+    s64 byteCount = op->size(op);
+    u8 *data = new u8[byteCount];   
+    usize ok = SDL_RWread(op, data, byteCount, 1);
+    assert (ok == 1);
+    
+    stbtt_fontinfo font;
+    stbtt_InitFont(&font, data, stbtt_GetFontOffsetForIndex(data,0));
+    
+    f32 scale = stbtt_ScaleForPixelHeight(&font, 15);
+    s32 ascent;
+    stbtt_GetFontVMetrics(&font, &ascent,0,0);
+    s32 baseline = (s32) (ascent*scale);
+    
+    u8 bitmap[256 * 256] = {};
+//    while (text[ch]) 
+    {   
+        glyph fontGlyph;
+        fontGlyph.code = 'f';
+        
+//        float x_shift = xpos - (float) floor(xpos);
+        stbtt_GetCodepointHMetrics(&font, fontGlyph.code, &fontGlyph.drawXAdvance, &fontGlyph.drawXOffset);
+        s32 x0, x1, y0, y1;
+        stbtt_GetCodepointBitmapBoxSubpixel(&font, fontGlyph.code, scale, scale, 0, 0, &x0,&y0,&x1,&y1);
+        fontGlyph.width = x1 - x0;
+        fontGlyph.height = y1 - y0;
+        fontGlyph.drawXOffset = x0;
+        fontGlyph.drawYOffset = y0;
+        stbtt_MakeCodepointBitmapSubpixel(&font, bitmap, x1-x0,y1-y0, 256, scale,scale,0,0, fontGlyph.code);
+    }
+    
+    texture fontTexture = loadTexture(bitmap, 256, 256, 1);    
     
     entity _entitieEntries[100];
     game_state gameState = {};
@@ -577,9 +672,10 @@ int main(int argc, char* argv[]) {
         }
         
         auto entities = &gameState.entities;
-        if(gameState.isGameover) {
+        if(gameState.isGameover) {            
             if (wasPressed(gameInput.enterKey)) {
                 initGame(&gameState, &player, &boss);
+                Mix_FadeInMusic(bgm, -1, 500);
                 gameState.isGameover = false;
                 continue;
             }
@@ -690,11 +786,13 @@ int main(int argc, char* argv[]) {
                         bullet->bullet.damage = MIN(bullet->bullet.damage, 3);
                         
                         bulletSpawnCooldown += 0.05f;
+                        
+                        Mix_PlayChannel(0, sfxShoot, 0);
                     }
                 }
             }
             
-            if(wasPressed(gameInput.bombKey)) {
+            if(wasPressed(gameInput.bombKey)) {                       
                 if (player->player.bombs > 0) {
                 
                     entity *bomb = nextEntity(entities);
@@ -709,6 +807,8 @@ int main(int argc, char* argv[]) {
                         bomb->relativeDrawCenter = vec2 {0.5f, 0.5f};
                         
                         player->player.bombs--;
+                        
+                        Mix_PlayChannel(1, sfxBomb, 0);
                      }
                 }
             }
@@ -776,6 +876,9 @@ int main(int argc, char* argv[]) {
             uiRect(&ui, 20 + bomb * (bombCountTexture.width + 5), ui.height - 250, bombCountTexture.width, bombCountTexture.height, White_Color);
         }
         
+        glBindTexture(GL_TEXTURE_2D, fontTexture.object);        
+        uiRect(&ui, 20, 20, 1000, 1000, White_Color);
+        
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
         //debug framerate, hitbox and player/boss normalized x, y coordinates
@@ -800,6 +903,8 @@ int main(int argc, char* argv[]) {
        
         //player power
         uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        
+      
         
         // render end
         

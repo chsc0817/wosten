@@ -173,35 +173,43 @@ void drawLine(transform xForm, f32 heightOverWidth, vec2 from, vec2 to, color li
 }
 
 
-texture loadTexture(const char *path){
-    SDL_Surface *textureSurface = IMG_Load(path);
+texture loadTexture(u8 *data, s32 width, s32 height, u8 bytesPerPixel, GLenum filter = GL_LINEAR){
     texture result;
     
     glGenTextures(1, &result.object);
     glBindTexture(GL_TEXTURE_2D, result.object);
     
-    switch(textureSurface->format->BytesPerPixel) {
+    switch(bytesPerPixel) {
         case 1: {
-            for (s32 i = 0; i < textureSurface->w * textureSurface->h; i++) {
-                ((u8*)textureSurface->pixels)[i] = 255 - ((u8*)textureSurface->pixels)[i];
-            }
-            
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSurface->w, textureSurface->h, 0, GL_RED, GL_UNSIGNED_BYTE, textureSurface->pixels);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, data);
             GLint swizzleMask[] = {GL_ONE, GL_ONE, GL_ONE, GL_RED};
             glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, swizzleMask);           
         } break;
         
         case 4: {
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSurface->w, textureSurface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureSurface->pixels);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         } break;
     }
    
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
-    result.width = textureSurface->w;
-    result.height = textureSurface->h;
+    result.width = width;
+    result.height = height;
     
+    return result;
+}
+
+texture loadTexture(const char *path, GLenum filter = GL_LINEAR){
+    SDL_Surface *textureSurface = IMG_Load(path);
+    
+    if (textureSurface->format->BytesPerPixel == 1){
+            for (s32 i = 0; i < textureSurface->w * textureSurface->h; i++) {
+                ((u8*)textureSurface->pixels)[i] = 255 - ((u8*)textureSurface->pixels)[i];
+            }
+    }
+            
+    texture result = loadTexture((u8*) textureSurface->pixels, textureSurface->w, textureSurface->h, textureSurface->format->BytesPerPixel, filter);    
     SDL_FreeSurface(textureSurface);
     return result;
 }

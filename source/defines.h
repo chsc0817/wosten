@@ -7,6 +7,8 @@
 #define u64 uint64_t
 #define f32 float
 #define s32 int32_t 
+#define s64 int64_t 
+#define usize size_t
 
 #define assert(condition) { \
     if (!(condition)) {\
