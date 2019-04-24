@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+#include <cstring>
 
 #include "defines.h"
 #include "render.h"
@@ -240,7 +241,7 @@ void update(game_state *state, f32 deltaSeconds){
                 
             } break;   
             
-             case (FLAG(Entity_Type_Bomb) | FLAG(Entity_Type_Bullet)): {
+            case (FLAG(Entity_Type_Bomb) | FLAG(Entity_Type_Bullet)): {
                 auto bullet = current->entities[0];
                 auto bomb = current->entities[1];
                 
@@ -390,6 +391,10 @@ struct key {
     bool hasChanged;
 };
 
+// gl functions
+
+PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback = NULL;
+
 struct input {
     union {
         key keys[8];
@@ -407,12 +412,6 @@ struct input {
     };
 };
 
-struct glyph {
-    u32 code;
-    s32 drawXAdvance;
-    s32 drawXOffset, drawYOffset;
-    s32 x,y,width,height;    
-};
 
 bool wasPressed(key k) {
     return (k.isPressed && k.hasChanged);
@@ -433,7 +432,7 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*player)->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
     (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};	
     
-     *boss  = nextEntity(&gameState->entities);    
+    *boss  = nextEntity(&gameState->entities);    
     (*boss)->xForm.pos = vec2{0.0f, 0.5f};  
     (*boss)->xForm.rotation = 0.0f;
     (*boss)->xForm.scale = 0.7f;
@@ -446,6 +445,78 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*boss)->blinkTime = 0.0f;
 };
 
+void APIENTRY
+wostenGLDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void * user_param)
+{
+    char *severity_text = NULL;
+    switch (severity)
+    {
+        case GL_DEBUG_SEVERITY_HIGH:
+        severity_text = "high";
+        break;
+        
+        case GL_DEBUG_SEVERITY_MEDIUM:
+        severity_text = "medium";
+        break;
+        
+        case GL_DEBUG_SEVERITY_LOW:
+        severity_text = "low";
+        break;
+        
+        case GL_DEBUG_SEVERITY_NOTIFICATION:
+        severity_text = "info";
+        return;
+        
+        default:
+        severity_text = "unkown severity";
+    }
+    
+    char *type_text = NULL;
+    switch (type)
+    {
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+        type_text = "depricated behavior";
+        break;
+        case GL_DEBUG_TYPE_ERROR:
+        type_text = "error";
+        break;
+        case GL_DEBUG_TYPE_MARKER:
+        type_text = "marker";
+        break;
+        case GL_DEBUG_TYPE_OTHER:
+        type_text = "other";
+        break;
+        case GL_DEBUG_TYPE_PERFORMANCE:
+        type_text = "performance";
+        break;
+        case GL_DEBUG_TYPE_POP_GROUP:	
+        type_text = "pop group";
+        break;
+        case GL_DEBUG_TYPE_PORTABILITY:
+        type_text = "portability";
+        break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:
+        type_text = "push group";
+        break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+        type_text = "undefined behavior";
+        break;
+        default:
+        type_text = "unkown type";
+    }
+    
+    printf("[gl %s prio %s | %u ]: %s\n", severity_text, type_text, id, message);
+    
+    // filter harmless errors
+    switch (id) {
+        // shader compilation failed
+        case 2000:
+        return;
+    }
+    
+    assert(type != GL_DEBUG_TYPE_ERROR);
+}	
+
 int main(int argc, char* argv[]) {
     srand (time(NULL));
     
@@ -453,7 +524,9 @@ int main(int argc, char* argv[]) {
     
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);              // Initialize SDL2
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    //SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
     // Create an application window with the following settings:
     window = SDL_CreateWindow(
         "wosten",                  // window title
@@ -473,8 +546,15 @@ int main(int argc, char* argv[]) {
     }
     
     // The window is open: could enter program loop here (see SDL_PollEvent())
-
+    
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
+    glDebugMessageCallback =(PFNGLDEBUGMESSAGECALLBACKPROC) SDL_GL_GetProcAddress("glDebugMessageCallback");
+    
+    if (glDebugMessageCallback) {
+        glEnable(GL_DEBUG_OUTPUT);
+        glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generatet in function call scope
+        glDebugMessageCallback(wostenGLDebugCallback, NULL);
+    }
     
     //sound init
     int mixInit = Mix_Init(MIX_INIT_MP3);
@@ -496,7 +576,7 @@ int main(int argc, char* argv[]) {
     
     //sfx
     Mix_AllocateChannels(2);
-//    Mix_Chunk *oof = loadChunk(Sfx_Death);   
+    //    Mix_Chunk *oof = loadChunk(Sfx_Death);   
     Mix_Chunk *sfxBomb = loadChunk(Sfx_Bomb);
     Mix_Chunk *sfxShoot = loadChunk(Sfx_Shoot); 
     
@@ -522,38 +602,63 @@ int main(int argc, char* argv[]) {
     texture bombCountTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_021.png");
     texture powerupTexture = loadTexture("data/Kenney/Letter Tiles/letter_P.png");
     
-    SDL_RWops* op = SDL_RWFromFile("C:/Windows/Fonts/bahnschrift.ttf", "rb");
+    SDL_RWops* op = SDL_RWFromFile("C:/Windows/Fonts/Arial.ttf", "rb");
     s64 byteCount = op->size(op);
     u8 *data = new u8[byteCount];   
     usize ok = SDL_RWread(op, data, byteCount, 1);
     assert (ok == 1);
     
-    stbtt_fontinfo font;
-    stbtt_InitFont(&font, data, stbtt_GetFontOffsetForIndex(data,0));
+    stbtt_fontinfo stbfont;
+    stbtt_InitFont(&stbfont, data, stbtt_GetFontOffsetForIndex(data,0));
     
-    f32 scale = stbtt_ScaleForPixelHeight(&font, 15);
+    f32 scale = stbtt_ScaleForPixelHeight(&stbfont, 23);
     s32 ascent;
-    stbtt_GetFontVMetrics(&font, &ascent,0,0);
+    stbtt_GetFontVMetrics(&stbfont, &ascent,0,0);
     s32 baseline = (s32) (ascent*scale);
     
-    u8 bitmap[256 * 256] = {};
-//    while (text[ch]) 
-    {   
-        glyph fontGlyph;
-        fontGlyph.code = 'f';
+    const s32 bitmapWidth = 512;
+    u8 bitmap[bitmapWidth * bitmapWidth] = {};
+    s32 xOffset = 0;
+    s32 yOffset = 0;
+    s32 maxHight = 0;
+    font defaultFont = {};
+    
+    //    while (text[ch]) 
+    
+    for (u32 i = ' '; i < 256; i++) {   
+        glyph *fontGlyph = defaultFont.glyphs + i;
+        fontGlyph->code = i;
         
-//        float x_shift = xpos - (float) floor(xpos);
-        stbtt_GetCodepointHMetrics(&font, fontGlyph.code, &fontGlyph.drawXAdvance, &fontGlyph.drawXOffset);
+        s32 unscaledXAdvance;  
+        stbtt_GetCodepointHMetrics(&stbfont, fontGlyph->code, &unscaledXAdvance, &fontGlyph->drawXOffset);
+        fontGlyph->drawXAdvance = unscaledXAdvance * scale;
+        
         s32 x0, x1, y0, y1;
-        stbtt_GetCodepointBitmapBoxSubpixel(&font, fontGlyph.code, scale, scale, 0, 0, &x0,&y0,&x1,&y1);
-        fontGlyph.width = x1 - x0;
-        fontGlyph.height = y1 - y0;
-        fontGlyph.drawXOffset = x0;
-        fontGlyph.drawYOffset = y0;
-        stbtt_MakeCodepointBitmapSubpixel(&font, bitmap, x1-x0,y1-y0, 256, scale,scale,0,0, fontGlyph.code);
+        stbtt_GetCodepointBitmapBox(&stbfont, fontGlyph->code, scale, scale, &x0, &y0, &x1, &y1);
+        fontGlyph->width = x1 - x0;
+        fontGlyph->height = y1 - y0;
+        fontGlyph->drawXOffset = x0;
+        // y0 is top corner, but its also negative ...
+        // we draw from bottom left corner
+        fontGlyph->drawYOffset = -y0 - fontGlyph->height;
+        if ((xOffset + fontGlyph->width) >= bitmapWidth) {
+            xOffset = 0;
+            yOffset += maxHight + 1;
+            maxHight = 0;
+        }
+        assert(fontGlyph->width <= bitmapWidth);
+        
+        stbtt_MakeCodepointBitmap(&stbfont, bitmap + xOffset + yOffset * bitmapWidth, fontGlyph->width, fontGlyph->height, bitmapWidth, scale, scale, fontGlyph->code);
+        fontGlyph->x = xOffset;
+        // we flip the texture so we need to change the y to the inverse
+        fontGlyph->y = bitmapWidth - yOffset - fontGlyph->height;
+        xOffset += fontGlyph->width + 1;
+        maxHight = MAX(maxHight, fontGlyph->height);
+        defaultFont.maxGlyphWidth = MAX(defaultFont.maxGlyphWidth, fontGlyph->width);
+        defaultFont.maxGlyphHeight = MAX(defaultFont.maxGlyphHeight, fontGlyph->height);
     }
     
-    texture fontTexture = loadTexture(bitmap, 256, 256, 1);    
+    defaultFont.texture = loadTexture(bitmap, bitmapWidth, bitmapWidth, 1, GL_NEAREST);    
     
     entity _entitieEntries[100];
     game_state gameState = {};
@@ -653,17 +758,25 @@ int main(int argc, char* argv[]) {
         SDL_GetWindowSize(window, &width, &height);
         
         f32 heightOverWidth = height / (f32)width; 
-        f32 worldWidthHalf = 1/ heightOverWidth;
+        f32 worldHeightOverWidth = 3.0f / 4.0f; 
+        f32 worldWidthHalf = 1 / worldHeightOverWidth;
+        f32 worldPixelWidth = height / worldHeightOverWidth;
         
-        glViewport(0, 0, width, height);
         ui.width = width;
         ui.height = height;
         
         debugHeightOrWidth = heightOverWidth;
         
+        glViewport(0, 0, width, height);
+        glScissor(0, 0, width, height);
+        glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        glEnable(GL_SCISSOR_TEST);
+//        glViewport((width - worldPixelWidth) * 0.5f, 0, worldPixelWidth, height);
+        glScissor((width - worldPixelWidth) * 0.5f, 0, worldPixelWidth, height);
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-               
         
         frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
@@ -672,7 +785,7 @@ int main(int argc, char* argv[]) {
         }
         
         auto entities = &gameState.entities;
-        if(gameState.isGameover) {            
+        if(gameState.isGameover) {                   
             if (wasPressed(gameInput.enterKey)) {
                 initGame(&gameState, &player, &boss);
                 Mix_FadeInMusic(bgm, -1, 500);
@@ -794,10 +907,10 @@ int main(int argc, char* argv[]) {
             
             if(wasPressed(gameInput.bombKey)) {                       
                 if (player->player.bombs > 0) {
-                
+                    
                     entity *bomb = nextEntity(entities);
-
-                     if (bomb != NULL) {
+                    
+                    if (bomb != NULL) {
                         bomb->xForm.pos = player->xForm.pos;
                         bomb->collisionRadius = 0.1f;
                         bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_Texel_Scale);
@@ -809,7 +922,7 @@ int main(int argc, char* argv[]) {
                         player->player.bombs--;
                         
                         Mix_PlayChannel(1, sfxBomb, 0);
-                     }
+                    }
                 }
             }
         } 
@@ -870,15 +983,6 @@ int main(int argc, char* argv[]) {
             }    
         }
         
-        //bomb count
-        glBindTexture(GL_TEXTURE_2D, bombCountTexture.object);        
-        for (int bomb = 0; bomb < player->player.bombs; bomb++){
-            uiRect(&ui, 20 + bomb * (bombCountTexture.width + 5), ui.height - 250, bombCountTexture.width, bombCountTexture.height, White_Color);
-        }
-        
-        glBindTexture(GL_TEXTURE_2D, fontTexture.object);        
-        uiRect(&ui, 20, 20, 1000, 1000, White_Color);
-        
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
         //debug framerate, hitbox and player/boss normalized x, y coordinates
@@ -897,15 +1001,54 @@ int main(int argc, char* argv[]) {
         drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
         
-        //boss hp
-        uiBar(&ui, 20, ui.height - 60, ui.width - 40,40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
-        
-       
-        //player power
-        uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
-        
-      
-        
+        //GUI
+        {
+            glEnable(GL_TEXTURE_2D);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GEQUAL, 0.1f);
+            glDisable(GL_SCISSOR_TEST);
+
+
+            //bomb count           
+            for (int bomb = 0; bomb < player->player.bombs; bomb++){
+                uiTexturedRect(&ui, bombCountTexture, 20 + bomb * (bombCountTexture.width + 5), ui.height - 250, bombCountTexture.width, bombCountTexture.height, 0, 0, bombCountTexture.width, bombCountTexture.height, White_Color);
+            }
+
+            //boss hp
+            auto cursor = uiBeginText(&ui, &defaultFont, 20, ui.height - 90);
+            uiWrite(&cursor, "BOSS ");
+            uiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
+
+            uiBar(&ui, 20, ui.height - 60, ui.width - 40, 40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+
+
+            //player power
+            uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+            
+            //game over
+            if(gameState.isGameover) {   
+                auto cursor = uiBeginText(&ui, &defaultFont, ui.width / 2, ui.height / 2, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
+                uiWrite(&cursor, 
+                        "Game Over");
+
+                cursor.color = White_Color;
+                cursor.scale = 1.0f;
+                uiWrite(&cursor, "\n"
+                                 "press ");
+
+                cursor.color = color {0.0f, 1.0f, 0.0f, 1.0f};
+                uiWrite(&cursor, "Enter ");
+
+                cursor.color = White_Color;
+                uiWrite(&cursor, "to continue");
+            }
+            
+            glDisable(GL_BLEND);
+            glDisable(GL_TEXTURE_2D);
+            glDisable(GL_ALPHA_TEST);
+        }
         // render end
         
         auto glError = glGetError();
