@@ -52,8 +52,7 @@ enum entity_type{
     Entity_Type_Fly,    
     Entity_Type_Bullet,
     Entity_Type_Bomb,
-    Entity_Type_Powerup,
-    
+    Entity_Type_Powerup,    
     
     Entity_Type_Count
 };
@@ -126,6 +125,10 @@ struct collision {
 
 struct game_state {
     entity_buffer entities;
+    f32 levelTime;
+    f32 levelDuration;
+    f32 levelWorldHeight; 
+    f32 levelLayersWorldUnitsPerPixels[2];
     bool isGameover;    
     texture bombTexture;
 };
@@ -291,7 +294,7 @@ void update(game_state *state, f32 deltaSeconds){
             
             case Entity_Type_Bomb: {
                 e->collisionRadius += deltaSeconds * 3.0f;
-                e->xForm.scale = e->collisionRadius * 3.0f / (state->bombTexture.height * Default_Texel_Scale);
+                e->xForm.scale = e->collisionRadius * 3.0f / (state->bombTexture.height * Default_World_Units_Per_Texel);
                 
                 if (e->collisionRadius > 6.0f) {
                     e->markedForDeletion = true;
@@ -417,8 +420,9 @@ bool wasPressed(key k) {
     return (k.isPressed && k.hasChanged);
 }
 
-void initGame (game_state *gameState, entity **player, entity **boss) {
+void initGame (game_state *gameState, entity **player) {
     gameState->entities.entityCount = 0;
+    gameState->levelTime = 0.0f;
     
     *player = nextEntity(&gameState->entities); 
     (*player)->xForm = TRANSFORM_IDENTITY;
@@ -431,18 +435,6 @@ void initGame (game_state *gameState, entity **player, entity **boss) {
     (*player)->type = Entity_Type_Player;
     (*player)->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
     (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};	
-    
-    *boss  = nextEntity(&gameState->entities);    
-    (*boss)->xForm.pos = vec2{0.0f, 0.5f};  
-    (*boss)->xForm.rotation = 0.0f;
-    (*boss)->xForm.scale = 0.7f;
-    (*boss)->collisionRadius = (*boss)->xForm.scale * 0.5;
-    (*boss)->maxHp = 500;
-    (*boss)->hp = (*boss)->maxHp;
-    (*boss)->type = Entity_Type_Boss;
-    (*boss)->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-    (*boss)->blinkDuration = 0.1f;
-    (*boss)->blinkTime = 0.0f;
 };
 
 void APIENTRY
@@ -576,11 +568,10 @@ int main(int argc, char* argv[]) {
     
     //sfx
     Mix_AllocateChannels(2);
-    //    Mix_Chunk *oof = loadChunk(Sfx_Death);   
     Mix_Chunk *sfxBomb = loadChunk(Sfx_Bomb);
-    Mix_Chunk *sfxShoot = loadChunk(Sfx_Shoot); 
+    //Mix_Chunk *sfxShoot = loadChunk(Sfx_Shoot); 
     
-    if(!sfxBomb || !sfxShoot) {
+    if(!sfxBomb) {
         printf("Error loading music file: %s \n", Mix_GetError());
     }
     
@@ -594,7 +585,10 @@ int main(int argc, char* argv[]) {
     u64 lastTime = SDL_GetPerformanceCounter();
     f32 scaleAlpha = 0;
     
+    texture levelLayer1 = loadTexture("data/level_1.png");
+    texture levelLayer2 = loadTexture("data/level_1_layer_2.png");
     texture playerTexture = loadTexture("data/Kenney/Animals/giraffe.png");
+    texture bossTexture = loadTexture("data/Kenney/Animals/parrot.png");
     texture flyTexture = loadTexture("data/Kenney/Animals/chicken.png");
     texture bulletTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_014.png");  
     texture bulletPoweredUpTexture = loadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
@@ -660,13 +654,22 @@ int main(int argc, char* argv[]) {
     
     defaultFont.texture = loadTexture(bitmap, bitmapWidth, bitmapWidth, 1, GL_NEAREST);    
     
+    f32 worldHeightOverWidth = 3.0f / 4.0f; 
+    f32 worldCameraHeight = 2.0f;  
+    f32 worldWidth = worldCameraHeight / worldHeightOverWidth;
+        
     entity _entitieEntries[100];
     game_state gameState = {};
+    gameState.levelDuration = 30.0f;
+    gameState.levelTime = 0.0f;
+    gameState.levelLayersWorldUnitsPerPixels[0] = worldWidth / levelLayer1.width;
+    gameState.levelLayersWorldUnitsPerPixels[1] = worldWidth / levelLayer2.width;
+    gameState.levelWorldHeight = gameState.levelLayersWorldUnitsPerPixels[0] * levelLayer1.height;  
     gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
     gameState.bombTexture = loadTexture("data/Kenney/particlePackCircle.png");
-    entity *player, *boss;
+    entity *player;
     
-    initGame(&gameState, &player, &boss);
+    initGame(&gameState, &player);
     
     //timer init
     
@@ -757,9 +760,7 @@ int main(int argc, char* argv[]) {
         s32 width, height;
         SDL_GetWindowSize(window, &width, &height);
         
-        f32 heightOverWidth = height / (f32)width; 
-        f32 worldHeightOverWidth = 3.0f / 4.0f; 
-        f32 worldWidthHalf = 1 / worldHeightOverWidth;
+        f32 heightOverWidth = height / (f32)width;        
         f32 worldPixelWidth = height / worldHeightOverWidth;
         
         ui.width = width;
@@ -784,10 +785,38 @@ int main(int argc, char* argv[]) {
             frameRateHistogram.currentIndex = 0;
         }
         
+        //game update 
+        gameState.levelTime += deltaSeconds;
+        gameState.levelTime = MIN(gameState.levelTime, gameState.levelDuration);
+        
         auto entities = &gameState.entities;
+        entity *boss = NULL;
+        
+        for (u32 i = 0; i <entities->entityCount; i++) {
+            if (entities->entries[i].type == Entity_Type_Boss) {
+                boss = entities->entries + i;
+                break;
+            } 
+        }
+        
+        if ((gameState.levelTime >= 10.0f) && (boss == NULL)) {
+            boss  = nextEntity(&gameState.entities);    
+            boss->xForm.pos = vec2{0.0f, 0.5f};  
+            boss->xForm.rotation = 0.0f;
+            boss->collisionRadius = 0.35f;
+            boss->xForm.scale = boss ->collisionRadius * 2.0f / (bossTexture.height * Default_World_Units_Per_Texel);
+            boss->relativeDrawCenter = vec2{0.5f, 0.5f};
+            boss->maxHp = 500;
+            boss->hp = boss->maxHp;
+            boss->type = Entity_Type_Boss;
+            boss->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+            boss->blinkDuration = 0.1f;
+            boss->blinkTime = 0.0f;
+        }      
+        
         if(gameState.isGameover) {                   
             if (wasPressed(gameInput.enterKey)) {
-                initGame(&gameState, &player, &boss);
+                initGame(&gameState, &player);
                 Mix_FadeInMusic(bgm, -1, 500);
                 gameState.isGameover = false;
                 continue;
@@ -836,7 +865,7 @@ int main(int argc, char* argv[]) {
             // worldWidth = windowWidth / windowHeight * worldHeight 
             // worldHeight = 2 (from -1 to 1)               
             
-            player->xForm.pos.x = CLAMP(player->xForm.pos.x, -worldWidthHalf + player->collisionRadius, worldWidthHalf - player->collisionRadius);
+            player->xForm.pos.x = CLAMP(player->xForm.pos.x, -worldWidth * 0.5f + player->collisionRadius, worldWidth * 0.5f - player->collisionRadius);
             
             {
 #if 0
@@ -851,7 +880,8 @@ int main(int argc, char* argv[]) {
                 player->xForm.rotation = rotation;
                 
 #else
-                player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
+                if (boss)
+                    player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
                 
                 
 #endif
@@ -900,7 +930,7 @@ int main(int argc, char* argv[]) {
                         
                         bulletSpawnCooldown += 0.05f;
                         
-                        Mix_PlayChannel(0, sfxShoot, 0);
+//                        Mix_PlayChannel(0, sfxShoot, 0);
                     }
                 }
             }
@@ -913,7 +943,7 @@ int main(int argc, char* argv[]) {
                     if (bomb != NULL) {
                         bomb->xForm.pos = player->xForm.pos;
                         bomb->collisionRadius = 0.1f;
-                        bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_Texel_Scale);
+                        bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_World_Units_Per_Texel);
                         bomb->xForm.rotation = 0;
                         bomb->type = Entity_Type_Bomb;
                         bomb->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Bullet);
@@ -927,58 +957,65 @@ int main(int argc, char* argv[]) {
             }
         } 
         // render
-        
-        
-        if (boss->blinkTime <= 0) {
-            drawCircle(boss->xForm, heightOverWidth, color{0.2f, 0.0f, 0.0f, 1.0f} ,true, 32);
-        } 
-        else {
-            color blinkColor = lerp(color{0.2f, 0.0f, 0.0f, 1.0f}, color{0.0f, 0.0f, 0.2f, 1.0f}, boss->blinkTime / boss->blinkDuration); 
-            drawCircle(boss->xForm, heightOverWidth, blinkColor, true, 32);
-        }
-        
+              
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_ALPHA_TEST);
         glAlphaFunc(GL_GEQUAL, 0.1f);
+        
+        //background
+        transform backgroundXForm = TRANSFORM_IDENTITY;
+        f32 currentLevelYPosition = lerp(worldCameraHeight * 0.5f, gameState.levelWorldHeight - worldCameraHeight * 0.5f, gameState.levelTime / gameState.levelDuration); 
+        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer1, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.levelWorldHeight}, gameState.levelLayersWorldUnitsPerPixels[0]);
+        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer2, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.levelWorldHeight}, gameState.levelLayersWorldUnitsPerPixels[1]);
+
         //draw player and all entities
         drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, White_Color, player->relativeDrawCenter);
         
         for (u32 i = 0; i < entities->entityCount; i++) {
-            switch (entities->entries[i].type) {
+            auto entity = entities->entries + i;
+            
+            switch (entity->type) {
                 
                 case Entity_Type_Bullet: {
-                    if (entities->entries[i].bullet.damage == 1) {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletTexture, White_Color, entities->entries[i].relativeDrawCenter);
+                    if (entity->bullet.damage == 1) {
+                        drawTexturedQuad(entity->xForm, heightOverWidth, bulletTexture, White_Color, entity->relativeDrawCenter);
                     } 
-                    else if (entities->entries[i].bullet.damage == 2){
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletPoweredUpTexture, White_Color, entities->entries[i].relativeDrawCenter);  
+                    else if (entity->bullet.damage == 2){
+                        drawTexturedQuad(entity->xForm, heightOverWidth, bulletPoweredUpTexture, White_Color, entity->relativeDrawCenter);  
                     }
                     else {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, bulletMaxPoweredUpTexture, White_Color, entities->entries[i].relativeDrawCenter);
+                        drawTexturedQuad(entity->xForm, heightOverWidth, bulletMaxPoweredUpTexture, White_Color, entity->relativeDrawCenter);
                     }
                 } break;
                 
                 case Entity_Type_Boss: {
+                    if (entity->blinkTime <= 0) {
+                        drawTexturedQuad(entity->xForm, heightOverWidth, bossTexture, White_Color, entity->relativeDrawCenter); 
+                    } 
+                    else {
+                        color blinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, entity->blinkTime / entity->blinkDuration); 
+                        drawTexturedQuad(entity->xForm, heightOverWidth, bossTexture, blinkColor, entity->relativeDrawCenter);          
+                    }   
                 } break;
                 
                 case Entity_Type_Fly: {
-                    if (entities->entries[i].blinkTime <= 0) {
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, White_Color, entities->entries[i].relativeDrawCenter); 
+                    if (entity->blinkTime <= 0) {
+                        drawTexturedQuad(entity->xForm, heightOverWidth, flyTexture, White_Color, entity->relativeDrawCenter); 
                     } 
                     else {
-                        color blinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, entities->entries[i].blinkTime / entities->entries[i].blinkDuration); 
-                        drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, flyTexture, blinkColor, entities->entries[i].relativeDrawCenter);          
+                        color blinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, entity->blinkTime / entity->blinkDuration); 
+                        drawTexturedQuad(entity->xForm, heightOverWidth, flyTexture, blinkColor, entity->relativeDrawCenter);          
                     }   
                 } break;
                 
                 case Entity_Type_Bomb: {
-                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, gameState.bombTexture, color{randZeroToOne(), randZeroToOne(), randZeroToOne(), 1.0f}, entities->entries[i].relativeDrawCenter);    
+                    drawTexturedQuad(entity->xForm, heightOverWidth, gameState.bombTexture, color{randZeroToOne(), randZeroToOne(), randZeroToOne(), 1.0f}, entity->relativeDrawCenter);    
                 } break;
                 
                 case Entity_Type_Powerup: {
-                    drawTexturedQuad(entities->entries[i].xForm, heightOverWidth, powerupTexture, White_Color, entities->entries[i].relativeDrawCenter);
+                    drawTexturedQuad(entity->xForm, heightOverWidth, powerupTexture, White_Color, entity->relativeDrawCenter);
                 } break;
             }    
         }
@@ -986,20 +1023,20 @@ int main(int argc, char* argv[]) {
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
         //debug framerate, hitbox and player/boss normalized x, y coordinates
+        
+#define DEBUG_UI
+#ifdef DEBUG_UI
         drawHistogram(frameRateHistogram);
         
         for (u32 i = 0; i < entities->entityCount; i++) {
             transform collisionTransform = entities->entries[i].xForm;
             collisionTransform.scale = 2 * entities->entries[i].collisionRadius;
             drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
-        }
-        drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
-        drawLine(player->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
+            drawLine(collisionTransform, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
+            drawLine(collisionTransform, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        }        
         
-        
-        drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
-        drawLine(boss->xForm, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
-        
+#endif //DEBUG_UI
         
         //GUI
         {
@@ -1017,12 +1054,13 @@ int main(int argc, char* argv[]) {
             }
 
             //boss hp
-            auto cursor = uiBeginText(&ui, &defaultFont, 20, ui.height - 90);
-            uiWrite(&cursor, "BOSS ");
-            uiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
+            if (boss) {
+                auto cursor = uiBeginText(&ui, &defaultFont, 20, ui.height - 90);
+                uiWrite(&cursor, "BOSS ");
+                uiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
 
-            uiBar(&ui, 20, ui.height - 60, ui.width - 40, 40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
-
+                uiBar(&ui, 20, ui.height - 60, ui.width - 40, 40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+            }
 
             //player power
             uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});

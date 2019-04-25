@@ -80,9 +80,9 @@ void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
     glEnd();
 }
 
-const f32 Default_Texel_Scale = 0.01f;
+const f32 Default_World_Units_Per_Texel = 0.01f;
 
-void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_Texel_Scale, f32 doFlip = 0.0f){
+void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_World_Units_Per_Texel, f32 doFlip = 0.0f){
     
     vec2 texelSize = vec2{1.0f / fillTexture.width, 1.0f / fillTexture.height};
     vec2 quadSize = vec2{(f32) fillTexture.width, (f32) fillTexture.height} * texelScale;
