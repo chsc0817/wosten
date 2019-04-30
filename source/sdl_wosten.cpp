@@ -102,34 +102,51 @@ struct entity {
     
 };
 
-struct entity_buffer {
-    entity *entries;
-    u32 entityCapacity;
-    u32 entityCount;
-};
+#define template_array_name entity_buffer
+#define template_array_data_type entity
+#define template_array_is_buffer
+#include "template_array.h"
 
 entity* nextEntity(entity_buffer *buffer){
-    if (buffer->entityCount < buffer->entityCapacity) {
-        auto result = buffer->entries + ((buffer->entityCount)++);
+    auto result = Push(buffer);
+    if (result != NULL) {
         *result = {};
-        
-        return result;
     }
     
-    return NULL;
+    return result;
 }
 
 struct collision {
     entity *entities[2];
 };
 
+struct entity_spawn_info {
+    f32 LevelTime;
+    entity Blueprint;
+    bool WasNotSpawned;
+};
+
+
+#define template_array_name      entity_spawn_infos
+#define template_array_data_type entity_spawn_info
+#define template_array_is_buffer 
+#define template_array_static_count 256
+#include "template_array.h"
+
+
+struct level {
+    entity_spawn_infos SpawnInfos;
+    f32 Time;
+    f32 Duration;
+    f32 WorldHeight; 
+    f32 LayersWorldUnitsPerPixels[2];
+};
+
 struct game_state {
     entity_buffer entities;
-    f32 levelTime;
-    f32 levelDuration;
-    f32 levelWorldHeight; 
-    f32 levelLayersWorldUnitsPerPixels[2];
+    level Level;
     bool isGameover;    
+    bool inEditMode;
     texture bombTexture;
 };
 
@@ -160,18 +177,18 @@ void update(game_state *state, f32 deltaSeconds){
     u32 collisionCount = 0;
     auto buffer = &state->entities;
     
-    for(u32 i = 0; i < buffer->entityCount; i++) {
+    for(u32 i = 0; i < buffer->Count; i++) {
         bool doBreak = false;
         
-        for (u32 j = i + 1; j < buffer->entityCount; j++){
+        for (u32 j = i + 1; j < buffer->Count; j++){
             
-            if (!(buffer->entries[i].collisionTypeMask & FLAG(buffer->entries[j].type)))
+            if (!(buffer->Base[i].collisionTypeMask & FLAG(buffer->Base[j].type)))
                 continue;
             
-            if (!(buffer->entries[j].collisionTypeMask & FLAG(buffer->entries[i].type)))
+            if (!(buffer->Base[j].collisionTypeMask & FLAG(buffer->Base[i].type)))
                 continue;
             
-            if (areIntersecting(circle{buffer->entries[i].xForm.pos, buffer->entries[i].collisionRadius}, circle{buffer->entries[j].xForm.pos, buffer->entries[j].collisionRadius})) 
+            if (areIntersecting(circle{buffer->Base[i].xForm.pos, buffer->Base[i].collisionRadius}, circle{buffer->Base[j].xForm.pos, buffer->Base[j].collisionRadius})) 
             {
                 if (collisionCount >= ARRAY_COUNT(collisions)) {
                     doBreak = true;
@@ -180,13 +197,13 @@ void update(game_state *state, f32 deltaSeconds){
                 
                 auto newCollision = collisions + (collisionCount++);               
                 
-                if (buffer->entries[i].type < buffer->entries[j].type) {
-                    newCollision->entities[0] = (buffer->entries) + i;
-                    newCollision->entities[1] = (buffer->entries) + j;
+                if (buffer->Base[i].type < buffer->Base[j].type) {
+                    newCollision->entities[0] = (buffer->Base) + i;
+                    newCollision->entities[1] = (buffer->Base) + j;
                 }
                 else {
-                    newCollision->entities[1] = (buffer->entries) + i;
-                    newCollision->entities[0] = (buffer->entries) + j;
+                    newCollision->entities[1] = (buffer->Base) + i;
+                    newCollision->entities[0] = (buffer->Base) + j;
                 }
             }
         }
@@ -274,9 +291,9 @@ void update(game_state *state, f32 deltaSeconds){
     
     
     
-    for(u32 i = 0; i < buffer->entityCount; i++) {
+    for(u32 i = 0; i < buffer->Count; i++) {
         
-        auto e = buffer->entries + i;
+        auto e = buffer->Base + i;
         
         switch(e->type) {
             case Entity_Type_Bullet: {
@@ -364,10 +381,10 @@ void update(game_state *state, f32 deltaSeconds){
     }
     
     u32 i = 0;
-    while (i < buffer->entityCount) {
-        if (buffer->entries[i].markedForDeletion) {
-            buffer->entries[i] = buffer->entries[(buffer->entityCount) - 1];
-            (buffer->entityCount)--;
+    while (i < buffer->Count) {
+        if (buffer->Base[i].markedForDeletion) {
+            buffer->Base[i] = buffer->Base[(buffer->Count) - 1];
+            (buffer->Count)--;
         }
         else{ 
             i++;
@@ -400,7 +417,7 @@ PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback = NULL;
 
 struct input {
     union {
-        key keys[8];
+        key keys[9];
         
         struct {
             key upKey;
@@ -411,6 +428,7 @@ struct input {
             key bombKey;
             key enterKey;
             key slowMovementKey;
+            key toggleEditModeKey;
         };
     };
 };
@@ -421,8 +439,12 @@ bool wasPressed(key k) {
 }
 
 void initGame (game_state *gameState, entity **player) {
-    gameState->entities.entityCount = 0;
-    gameState->levelTime = 0.0f;
+    gameState->entities.Count = 0;
+    for (u32 i = 0; i < gameState->Level.SpawnInfos.Count; i++) {
+        gameState->Level.SpawnInfos[i].WasNotSpawned = true;
+    }
+    
+    gameState->Level.Time = 0.0f;
     
     *player = nextEntity(&gameState->entities); 
     (*player)->xForm = TRANSFORM_IDENTITY;
@@ -508,6 +530,28 @@ wostenGLDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GL
     
     assert(type != GL_DEBUG_TYPE_ERROR);
 }	
+
+void editModeUpdate(game_state *gameState, f32 deltaSeconds, input gameInput, f32 heightOverWidth) {
+    if (gameInput.upKey.isPressed) {
+        gameState->Level.Time += 3 * deltaSeconds;
+    }
+    
+    if (gameInput.downKey.isPressed) {
+        gameState->Level.Time -= 3 * deltaSeconds;
+    }
+    
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+    
+    for (u32 SpawnIndex = 0; SpawnIndex < gameState->Level.SpawnInfos.Count; SpawnIndex++) {
+        auto Info = gameState->Level.SpawnInfos.Base + SpawnIndex;
+        if (Info->LevelTime <= gameState->Level.Time) {
+            transform collisionTransform = Info->Blueprint.xForm;
+            collisionTransform.scale = 2 * Info->Blueprint.collisionRadius;
+            drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false, 16, -0.5f);
+        }
+    }
+}
 
 int main(int argc, char* argv[]) {
     srand (time(NULL));
@@ -657,17 +701,35 @@ int main(int argc, char* argv[]) {
     f32 worldHeightOverWidth = 3.0f / 4.0f; 
     f32 worldCameraHeight = 2.0f;  
     f32 worldWidth = worldCameraHeight / worldHeightOverWidth;
-        
+    
     entity _entitieEntries[100];
     game_state gameState = {};
-    gameState.levelDuration = 30.0f;
-    gameState.levelTime = 0.0f;
-    gameState.levelLayersWorldUnitsPerPixels[0] = worldWidth / levelLayer1.width;
-    gameState.levelLayersWorldUnitsPerPixels[1] = worldWidth / levelLayer2.width;
-    gameState.levelWorldHeight = gameState.levelLayersWorldUnitsPerPixels[0] * levelLayer1.height;  
+    gameState.Level.Duration = 30.0f;
+    gameState.Level.Time = 0.0f;
+    gameState.Level.LayersWorldUnitsPerPixels[0] = worldWidth / levelLayer1.width;
+    gameState.Level.LayersWorldUnitsPerPixels[1] = worldWidth / levelLayer2.width;
+    gameState.Level.WorldHeight = gameState.Level.LayersWorldUnitsPerPixels[0] * levelLayer1.height;  
     gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
     gameState.bombTexture = loadTexture("data/Kenney/particlePackCircle.png");
     entity *player;
+    
+    
+    auto bossSpawnInfo  = Push(&gameState.Level.SpawnInfos);
+    assert(bossSpawnInfo);
+    bossSpawnInfo->LevelTime = 10.0f;
+    bossSpawnInfo->WasNotSpawned = true;
+    
+    bossSpawnInfo->Blueprint.xForm.pos = vec2{0.0f, 0.5f};  
+    bossSpawnInfo->Blueprint.xForm.rotation = 0.0f;
+    bossSpawnInfo->Blueprint.collisionRadius = 0.35f;
+    bossSpawnInfo->Blueprint.xForm.scale = bossSpawnInfo->Blueprint.collisionRadius * 2.0f / (bossTexture.height * Default_World_Units_Per_Texel);
+    bossSpawnInfo->Blueprint.relativeDrawCenter = vec2{0.5f, 0.5f};
+    bossSpawnInfo->Blueprint.maxHp = 500;
+    bossSpawnInfo->Blueprint.hp = bossSpawnInfo->Blueprint.maxHp;
+    bossSpawnInfo->Blueprint.type = Entity_Type_Boss;
+    bossSpawnInfo->Blueprint.collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+    bossSpawnInfo->Blueprint.blinkDuration = 0.1f;
+    bossSpawnInfo->Blueprint.blinkTime = 0.0f;
     
     initGame(&gameState, &player);
     
@@ -747,6 +809,12 @@ int main(int argc, char* argv[]) {
                             gameInput.slowMovementKey.isPressed = (event.key.type == SDL_KEYDOWN);
                             gameInput.slowMovementKey.hasChanged = true;
                         } break;
+                        
+                        case SDL_SCANCODE_F1: {
+                            gameInput.toggleEditModeKey.isPressed = (event.key.type == SDL_KEYDOWN);
+                            gameInput.toggleEditModeKey.hasChanged = true;
+                        } break;
+                        
                     }
                 } break;
             }
@@ -771,13 +839,15 @@ int main(int argc, char* argv[]) {
         glViewport(0, 0, width, height);
         glScissor(0, 0, width, height);
         glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         
         glEnable(GL_SCISSOR_TEST);
-//        glViewport((width - worldPixelWidth) * 0.5f, 0, worldPixelWidth, height);
+        //        glViewport((width - worldPixelWidth) * 0.5f, 0, worldPixelWidth, height);
         glScissor((width - worldPixelWidth) * 0.5f, 0, worldPixelWidth, height);
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+        
+        glEnable(GL_DEPTH_TEST);
         
         frameRateHistogram.values[frameRateHistogram.currentIndex] = 1 / deltaSeconds;
         frameRateHistogram.currentIndex++;
@@ -785,179 +855,188 @@ int main(int argc, char* argv[]) {
             frameRateHistogram.currentIndex = 0;
         }
         
-        //game update 
-        gameState.levelTime += deltaSeconds;
-        gameState.levelTime = MIN(gameState.levelTime, gameState.levelDuration);
+        //game update
         
         auto entities = &gameState.entities;
         entity *boss = NULL;
         
-        for (u32 i = 0; i <entities->entityCount; i++) {
-            if (entities->entries[i].type == Entity_Type_Boss) {
-                boss = entities->entries + i;
-                break;
-            } 
+        //same as gameState.inEditMode ^= wasPressed(...)
+        if (wasPressed(gameInput.toggleEditModeKey)) {
+            gameState.inEditMode = !gameState.inEditMode;
         }
         
-        if ((gameState.levelTime >= 10.0f) && (boss == NULL)) {
-            boss  = nextEntity(&gameState.entities);    
-            boss->xForm.pos = vec2{0.0f, 0.5f};  
-            boss->xForm.rotation = 0.0f;
-            boss->collisionRadius = 0.35f;
-            boss->xForm.scale = boss ->collisionRadius * 2.0f / (bossTexture.height * Default_World_Units_Per_Texel);
-            boss->relativeDrawCenter = vec2{0.5f, 0.5f};
-            boss->maxHp = 500;
-            boss->hp = boss->maxHp;
-            boss->type = Entity_Type_Boss;
-            boss->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-            boss->blinkDuration = 0.1f;
-            boss->blinkTime = 0.0f;
-        }      
-        
-        if(gameState.isGameover) {                   
-            if (wasPressed(gameInput.enterKey)) {
-                initGame(&gameState, &player);
-                Mix_FadeInMusic(bgm, -1, 500);
-                gameState.isGameover = false;
-                continue;
-            }
-            player->xForm.rotation += 2 * PI * deltaSeconds;
-            
+        if (gameState.inEditMode) {
+            editModeUpdate(&gameState, deltaSeconds, gameInput, heightOverWidth);
         }
         else {
+            gameState.Level.Time += deltaSeconds;
+            gameState.Level.Time = MIN(gameState.Level.Time, gameState.Level.Duration);
             
-            //bullet movement        
-            if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
             
-            vec2 direction = {};
-            f32 speed = 1.0f;
-            
-            update(&gameState, deltaSeconds);
-            
-            //player movement
-            if (gameInput.leftKey.isPressed) {
-                direction.x -= 1;
-                //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
+            for (u32 i = 0; i <entities->Count; i++) {
+                if (entities->Base[i].type == Entity_Type_Boss) {
+                    boss = entities->Base + i;
+                    break;
+                } 
             }
             
-            if (gameInput.rightKey.isPressed) {
-                direction.x += 1; 
-                //player->xForm.rotation += 0.5f * PI * deltaSeconds;
+            for (u32 SpawnIndex = 0; SpawnIndex < ARRAY_COUNT(gameState.Level.SpawnInfos); SpawnIndex++) {
+                auto Info = gameState.Level.SpawnInfos.Base + SpawnIndex;
+                if (Info->WasNotSpawned && (Info->LevelTime <= gameState.Level.Time)) {
+                    auto Entity = nextEntity(entities);
+                    if (Entity != NULL) {
+                        *Entity = Info->Blueprint;
+                        Info->WasNotSpawned = false;
+                    }
+                }
+                
             }
             
-            if (gameInput.upKey.isPressed) {
-                direction.y += 1; 
+            if(gameState.isGameover) {                   
+                if (wasPressed(gameInput.enterKey)) {
+                    initGame(&gameState, &player);
+                    Mix_FadeInMusic(bgm, -1, 500);
+                    gameState.isGameover = false;
+                    continue;
+                }
+                player->xForm.rotation += 2 * PI * deltaSeconds;
+                
             }
-            
-            if (gameInput.downKey.isPressed) {
-                direction.y -= 1; 
-            }
-            
-            if (gameInput.slowMovementKey.isPressed) {
-                speed = speed * 0.5f;
-            }
-            
-            direction = normalizeOrZero(direction);            
-            player->xForm.pos = player->xForm.pos + direction * (speed * deltaSeconds);
-            
-            player->xForm.pos.y = CLAMP(player->xForm.pos.y , -1.0f + player->collisionRadius, 1.0f - player->collisionRadius);
-            
-            // worldWidth = windowWidth / windowHeight * worldHeight 
-            // worldHeight = 2 (from -1 to 1)               
-            
-            player->xForm.pos.x = CLAMP(player->xForm.pos.x, -worldWidth * 0.5f + player->collisionRadius, worldWidth * 0.5f - player->collisionRadius);
-            
-            {
+            else {
+                
+                //bullet movement        
+                if (bulletSpawnCooldown > 0) bulletSpawnCooldown -= deltaSeconds;
+                
+                vec2 direction = {};
+                f32 speed = 1.0f;
+                
+                update(&gameState, deltaSeconds);
+                
+                //player movement
+                if (gameInput.leftKey.isPressed) {
+                    direction.x -= 1;
+                    //player->xForm.rotation -= 0.5f * PI * deltaSeconds;
+                }
+                
+                if (gameInput.rightKey.isPressed) {
+                    direction.x += 1; 
+                    //player->xForm.rotation += 0.5f * PI * deltaSeconds;
+                }
+                
+                if (gameInput.upKey.isPressed) {
+                    direction.y += 1; 
+                }
+                
+                if (gameInput.downKey.isPressed) {
+                    direction.y -= 1; 
+                }
+                
+                if (gameInput.slowMovementKey.isPressed) {
+                    speed = speed * 0.5f;
+                }
+                
+                direction = normalizeOrZero(direction);            
+                player->xForm.pos = player->xForm.pos + direction * (speed * deltaSeconds);
+                
+                player->xForm.pos.y = CLAMP(player->xForm.pos.y , -1.0f + player->collisionRadius, 1.0f - player->collisionRadius);
+                
+                // worldWidth = windowWidth / windowHeight * worldHeight 
+                // worldHeight = 2 (from -1 to 1)               
+                
+                player->xForm.pos.x = CLAMP(player->xForm.pos.x, -worldWidth * 0.5f + player->collisionRadius, worldWidth * 0.5f - player->collisionRadius);
+                
+                {
 #if 0
-                f32 rotation = asin((enemies[0].xForm.pos.x - player->xForm.pos.x) / length(enemies[0].xForm.pos - player->xForm.pos));
-                if (enemies[0].xForm.pos.y < player->xForm.pos.y) {
-                    rotation = rotation - PI;
-                }
-                else {
-                    rotation = 2 * PI - rotation;
-                }
-                
-                player->xForm.rotation = rotation;
-                
+                    f32 rotation = asin((enemies[0].xForm.pos.x - player->xForm.pos.x) / length(enemies[0].xForm.pos - player->xForm.pos));
+                    if (enemies[0].xForm.pos.y < player->xForm.pos.y) {
+                        rotation = rotation - PI;
+                    }
+                    else {
+                        rotation = 2 * PI - rotation;
+                    }
+                    
+                    player->xForm.rotation = rotation;
+                    
 #else
-                if (boss)
-                    player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
-                
-                
+                    if (boss)
+                        player->xForm.rotation = lookAtRotation(player->xForm.pos, boss->xForm.pos);
+                    
+                    
 #endif
-            }
-            {
-                chickenSpawnCooldown -= deltaSeconds;
+                }
+                {
+                    chickenSpawnCooldown -= deltaSeconds;
+                    
+                    if(chickenSpawnCooldown <= 0) {
+                        //unleash the chicken!
+                        entity *chicken = nextEntity(entities);
+                        
+                        if (chicken != NULL) {               
+                            chicken->xForm.rotation = 0.0f;
+                            chicken->xForm.scale = 0.09f;
+                            chicken->collisionRadius = chicken->xForm.scale * 0.65;
+                            chicken->maxHp = 10;
+                            chicken->hp = chicken->maxHp;
+                            chicken->type = Entity_Type_Fly;
+                            chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
+                            chicken->fly.flipInterval = 1.5f;
+                            chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
+                            chicken->fly.velocity = vec2{1.0f, 0.1f};    
+                            chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randZeroToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
+                            chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
+                            chicken->blinkDuration = 0.1f;
+                        }        
+                        chickenSpawnCooldown += 1.0f;
+                    }
+                }
                 
-                if(chickenSpawnCooldown <= 0) {
-                    //unleash the chicken!
-                    entity *chicken = nextEntity(entities);
-                    
-                    if (chicken != NULL) {               
-                        chicken->xForm.rotation = 0.0f;
-                        chicken->xForm.scale = 0.09f;
-                        chicken->collisionRadius = chicken->xForm.scale * 0.65;
-                        chicken->maxHp = 10;
-                        chicken->hp = chicken->maxHp;
-                        chicken->type = Entity_Type_Fly;
-                        chicken->collisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-                        chicken->fly.flipInterval = 1.5f;
-                        chicken->fly.flipCountdown = chicken->fly.flipInterval * randZeroToOne();
-                        chicken->fly.velocity = vec2{1.0f, 0.1f};    
-                        chicken->xForm.pos = vec2{chicken->fly.velocity.x * chicken->fly.flipInterval * -0.5f, randZeroToOne()} + chicken->fly.velocity * (chicken->fly.flipInterval - chicken->fly.flipCountdown);   
-                        chicken->relativeDrawCenter = vec2 {0.5f, 0.44f};
-                        chicken->blinkDuration = 0.1f;
-                    }        
-                    chickenSpawnCooldown += 1.0f;
+                if(gameInput.fireKey.isPressed) {
+                    if ((bulletSpawnCooldown <= 0)) {
+                        entity *bullet = nextEntity(entities);
+                        
+                        if (bullet != NULL) {
+                            bullet->xForm.pos = player->xForm.pos;
+                            bullet->xForm.scale = 0.2f;
+                            bullet->xForm.rotation = 0;
+                            bullet->collisionRadius = bullet->xForm.scale * 0.2;
+                            bullet->type = Entity_Type_Bullet;
+                            bullet->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly);
+                            bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                            
+                            bullet->bullet.damage = (player->player.power / 20) + 1;
+                            bullet->bullet.damage = MIN(bullet->bullet.damage, 3);
+                            
+                            bulletSpawnCooldown += 0.05f;
+                            
+                            //                        Mix_PlayChannel(0, sfxShoot, 0);
+                        }
+                    }
                 }
-            }
-            
-            if(gameInput.fireKey.isPressed) {
-                if ((bulletSpawnCooldown <= 0)) {
-                    entity *bullet = nextEntity(entities);
-                    
-                    if (bullet != NULL) {
-                        bullet->xForm.pos = player->xForm.pos;
-                        bullet->xForm.scale = 0.2f;
-                        bullet->xForm.rotation = 0;
-                        bullet->collisionRadius = bullet->xForm.scale * 0.2;
-                        bullet->type = Entity_Type_Bullet;
-                        bullet->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly);
-                        bullet->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                
+                if(wasPressed(gameInput.bombKey)) {                       
+                    if (player->player.bombs > 0) {
                         
-                        bullet->bullet.damage = (player->player.power / 20) + 1;
-                        bullet->bullet.damage = MIN(bullet->bullet.damage, 3);
+                        entity *bomb = nextEntity(entities);
                         
-                        bulletSpawnCooldown += 0.05f;
-                        
-//                        Mix_PlayChannel(0, sfxShoot, 0);
+                        if (bomb != NULL) {
+                            bomb->xForm.pos = player->xForm.pos;
+                            bomb->collisionRadius = 0.1f;
+                            bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_World_Units_Per_Texel);
+                            bomb->xForm.rotation = 0;
+                            bomb->type = Entity_Type_Bomb;
+                            bomb->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Bullet);
+                            bomb->relativeDrawCenter = vec2 {0.5f, 0.5f};
+                            
+                            player->player.bombs--;
+                            
+                            Mix_PlayChannel(1, sfxBomb, 0);
+                        }
                     }
                 }
             }
-            
-            if(wasPressed(gameInput.bombKey)) {                       
-                if (player->player.bombs > 0) {
-                    
-                    entity *bomb = nextEntity(entities);
-                    
-                    if (bomb != NULL) {
-                        bomb->xForm.pos = player->xForm.pos;
-                        bomb->collisionRadius = 0.1f;
-                        bomb->xForm.scale = bomb->collisionRadius * 3.0f / (gameState.bombTexture.height * Default_World_Units_Per_Texel);
-                        bomb->xForm.rotation = 0;
-                        bomb->type = Entity_Type_Bomb;
-                        bomb->collisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Bullet);
-                        bomb->relativeDrawCenter = vec2 {0.5f, 0.5f};
-                        
-                        player->player.bombs--;
-                        
-                        Mix_PlayChannel(1, sfxBomb, 0);
-                    }
-                }
-            }
-        } 
+        }
         // render
-              
+        
         glEnable(GL_TEXTURE_2D);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -966,15 +1045,15 @@ int main(int argc, char* argv[]) {
         
         //background
         transform backgroundXForm = TRANSFORM_IDENTITY;
-        f32 currentLevelYPosition = lerp(worldCameraHeight * 0.5f, gameState.levelWorldHeight - worldCameraHeight * 0.5f, gameState.levelTime / gameState.levelDuration); 
-        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer1, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.levelWorldHeight}, gameState.levelLayersWorldUnitsPerPixels[0]);
-        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer2, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.levelWorldHeight}, gameState.levelLayersWorldUnitsPerPixels[1]);
-
+        f32 currentLevelYPosition = lerp(worldCameraHeight * 0.5f, gameState.Level.WorldHeight - worldCameraHeight * 0.5f, gameState.Level.Time / gameState.Level.Duration); 
+        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer1, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.Level.WorldHeight}, gameState.Level.LayersWorldUnitsPerPixels[0], 0.9f);
+        drawTexturedQuad(backgroundXForm, heightOverWidth, levelLayer2, White_Color, vec2 {0.5f,  currentLevelYPosition / gameState.Level.WorldHeight}, gameState.Level.LayersWorldUnitsPerPixels[1], 0.8f);
+        
         //draw player and all entities
         drawTexturedQuad(player->xForm, heightOverWidth, playerTexture, White_Color, player->relativeDrawCenter);
         
-        for (u32 i = 0; i < entities->entityCount; i++) {
-            auto entity = entities->entries + i;
+        for (u32 i = 0; i < entities->Count; i++) {
+            auto entity = entities->Base + i;
             
             switch (entity->type) {
                 
@@ -1028,9 +1107,9 @@ int main(int argc, char* argv[]) {
 #ifdef DEBUG_UI
         drawHistogram(frameRateHistogram);
         
-        for (u32 i = 0; i < entities->entityCount; i++) {
-            transform collisionTransform = entities->entries[i].xForm;
-            collisionTransform.scale = 2 * entities->entries[i].collisionRadius;
+        for (u32 i = 0; i < entities->Count; i++) {
+            transform collisionTransform = (*entities)[i].xForm;
+            collisionTransform.scale = 2 * entities->Base[i].collisionRadius;
             drawCircle(collisionTransform, heightOverWidth, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
             drawLine(collisionTransform, heightOverWidth, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
             drawLine(collisionTransform, heightOverWidth, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
@@ -1046,22 +1125,22 @@ int main(int argc, char* argv[]) {
             glEnable(GL_ALPHA_TEST);
             glAlphaFunc(GL_GEQUAL, 0.1f);
             glDisable(GL_SCISSOR_TEST);
-
-
+            glDisable(GL_DEPTH_TEST);
+            
             //bomb count           
             for (int bomb = 0; bomb < player->player.bombs; bomb++){
                 uiTexturedRect(&ui, bombCountTexture, 20 + bomb * (bombCountTexture.width + 5), ui.height - 250, bombCountTexture.width, bombCountTexture.height, 0, 0, bombCountTexture.width, bombCountTexture.height, White_Color);
             }
-
+            
             //boss hp
             if (boss) {
                 auto cursor = uiBeginText(&ui, &defaultFont, 20, ui.height - 90);
                 uiWrite(&cursor, "BOSS ");
                 uiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
-
+                
                 uiBar(&ui, 20, ui.height - 60, ui.width - 40, 40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
             }
-
+            
             //player power
             uiBar(&ui, 20, ui.height - 200, 120,40, (player->player.power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
             
@@ -1070,15 +1149,15 @@ int main(int argc, char* argv[]) {
                 auto cursor = uiBeginText(&ui, &defaultFont, ui.width / 2, ui.height / 2, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
                 uiWrite(&cursor, 
                         "Game Over");
-
+                
                 cursor.color = White_Color;
                 cursor.scale = 1.0f;
                 uiWrite(&cursor, "\n"
-                                 "press ");
-
+                        "press ");
+                
                 cursor.color = color {0.0f, 1.0f, 0.0f, 1.0f};
                 uiWrite(&cursor, "Enter ");
-
+                
                 cursor.color = White_Color;
                 uiWrite(&cursor, "to continue");
             }

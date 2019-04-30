@@ -82,7 +82,7 @@ void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
 
 const f32 Default_World_Units_Per_Texel = 0.01f;
 
-void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_World_Units_Per_Texel, f32 doFlip = 0.0f){
+void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_World_Units_Per_Texel, f32 z = 0, f32 doFlip = 0.0f){
     
     vec2 texelSize = vec2{1.0f / fillTexture.width, 1.0f / fillTexture.height};
     vec2 quadSize = vec2{(f32) fillTexture.width, (f32) fillTexture.height} * texelScale;
@@ -97,19 +97,19 @@ void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture,
     
     glTexCoord2f(0, lerp(0, 1, doFlip));  	
     vec2 v = transformPoint(xForm, vec2{0, 0} - center, heightOverWidth);
-    glVertex2f(v.x, v.y);    
+    glVertex3f(v.x, v.y, z);    
     
     glTexCoord2f(1, lerp(0, 1, doFlip));
     v= transformPoint(xForm, vec2{quadSize.x, 0} - center, heightOverWidth);
-    glVertex2f(v.x, v.y);
+    glVertex3f(v.x, v.y, z);
 	
     glTexCoord2f(1, lerp(1, 0, doFlip));
     v = transformPoint(xForm, quadSize - center, heightOverWidth);
-    glVertex2f(v.x, v.y);
+    glVertex3f(v.x, v.y, z);
 	
     glTexCoord2f(0, lerp(1, 0, doFlip));
     v = transformPoint(xForm, vec2{0, quadSize.y} - center, heightOverWidth);
-    glVertex2f(v.x, v.y);
+    glVertex3f(v.x, v.y, z);
     
     glEnd();
 }
@@ -135,19 +135,19 @@ void uiRect(ui_context *ui, s32 x, s32 y, s32 width, s32 height, color rectColor
     }
     
     glColor4fv(rectColor.values);        
-
+    
     vec2 v = uiToGl(ui, x, y);
     glVertex2f(v.x, v.y);
-
+    
     v = uiToGl(ui, x + width, y);
     glVertex2f(v.x, v.y);
-
+    
     v = uiToGl(ui, x + width, y + height);
     glVertex2f(v.x, v.y);
-
+    
     v = uiToGl(ui, x, y + height);
     glVertex2f(v.x, v.y);
-
+    
     glEnd();
     
 }
@@ -208,7 +208,7 @@ void uiText(ui_text_cursor *cursor, const char *text, u32 textCount) {
             cursor->currentX = cursor->startX;
             cursor->currentY -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
         }
-
+        
         glyph *fontGlyph = cursor->font->glyphs + text[i];
         if (fontGlyph->code == 0) {
             continue;
@@ -237,18 +237,18 @@ void uiBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, 
     
 }
 
-void drawCircle(transform xForm, f32 heightOverWidth, color fillColor = {0.7f, 0.0f, 0.0f, 1.0f}, bool isFilled = true, u32 n = 16) {
+void drawCircle(transform xForm, f32 heightOverWidth, color fillColor = {0.7f, 0.0f, 0.0f, 1.0f}, bool isFilled = true, u32 n = 16, f32 z = 0) {
     if (isFilled) {
         glBegin(GL_TRIANGLE_FAN);
         glColor4f(fillColor.r, fillColor.g, fillColor.b, fillColor.a);
         
         vec2 v = transformPoint(xForm, vec2{0, 0}, heightOverWidth);
-        glVertex2f(v.x, v.y);
+        glVertex3f(v.x, v.y, z);
         
         for (u32 i = 0; i < n + 1; i++) { 
             xForm.rotation = i * ((2 * PI) / n); 
             v = transformPoint(xForm, vec2{0, 0.5f}, heightOverWidth);
-            glVertex2f(v.x, v.y);		
+            glVertex3f(v.x, v.y, z);		
         }	
     }
     else {
@@ -258,7 +258,7 @@ void drawCircle(transform xForm, f32 heightOverWidth, color fillColor = {0.7f, 0
         for (u32 i = 0; i < n + 1; i++) { 
             xForm.rotation = i * ((2 * PI) / n); 
             auto v = transformPoint(xForm, vec2{0, 0.5f}, heightOverWidth);
-            glVertex2f(v.x, v.y);		
+            glVertex3f(v.x, v.y, z);		
         }	
     }
 	
