@@ -33,6 +33,43 @@ struct vec2 {
     f32 x, y;
 };
 
+union Rect {
+    struct {
+        f32 x1, y1;
+        f32 x2, y2;
+    };
+
+    struct {
+        vec2 TopLeft;
+        vec2 BottomRight;    
+    };
+};
+
+//return rectangle with x as top left point and y as right bottom 
+Rect MakeRect (f32 x1, f32 y1, f32 x2, f32 y2) {
+    Rect result = {};
+    if ((x1 == x2) || (y1 == y2))
+        return result;
+
+    if (y1 > y2) {
+        result.x1 = x1;
+        result.y1 = y1;
+        result.x2 = x2;
+        result.y2 = y2;
+    }
+    else {
+        result.x1 = x2;
+        result.y1 = y2;
+        result.x2 = x1;
+        result.y2 = y1;
+    }
+
+    return result;
+}
+
+Rect MakeRect(vec2 Point1, vec2 Point2) {
+    return MakeRect(Point1.x, Point1.y, Point2.x, Point2.y);
+}
 
 //vector operations
 vec2 operator* (vec2 a, f32 scale) {

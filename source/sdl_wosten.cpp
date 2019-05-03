@@ -9,42 +9,18 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
-#include <cstring>
+//#include <cstring>
 
 #include "defines.h"
 #include "render.h"
 
 #define TRANSFORM_IDENTITY {{}, 0.0f, 1.0f}
 
-struct histogram {
-    f32 values[10 * 60];
-    u32 currentIndex;
-};
 
-void drawHistogram(histogram h) {
-    glBegin(GL_LINES);
-    
-    f32 maxValue = 0;
-    
-    for(u32 i = 0; i < (ARRAY_COUNT(h.values)); i++) {
-        if (h.values[i] > maxValue) {
-            maxValue = h.values[i]; 
-        }
-    }
-    
-    f32 scale = 0.5 / 60;
-    
-    for(u32 i = 0; i < (ARRAY_COUNT(h.values) - 1); i++) {
-        glVertex2f( i * (2 / (f32) ARRAY_COUNT(h.values)) - 1, h.values[i] * scale);
-        glVertex2f((i + 1) * (2 / (f32) ARRAY_COUNT(h.values)) - 1, h.values[i + 1] * scale);
-    } 
-    
-    glColor4f(0.0f, 1.0f, 0.0f, 1.0f);
-    glVertex2f(-1, scale * 60);
-    glVertex2f(1, scale * 60);
-    
-    glEnd();
-}
+
+Rect DebugRect = MakeRect(100.0f, 300.0f, 150.0f, 100.0f);
+
+
 
 enum entity_type{
     Entity_Type_Player,
@@ -173,6 +149,7 @@ Mix_Chunk *loadChunk(int sfxEnum) {
 }
 
 void update(game_state *state, f32 deltaSeconds){    
+
     collision collisions[1024];
     u32 collisionCount = 0;
     auto buffer = &state->entities;
@@ -539,6 +516,24 @@ void editModeUpdate(game_state *gameState, f32 deltaSeconds, input gameInput, f3
     if (gameInput.downKey.isPressed) {
         gameState->Level.Time -= 3 * deltaSeconds;
     }
+
+    if (gameInput.rightKey.isPressed) {
+        DebugRect.BottomRight.x += 100 * deltaSeconds;
+    }
+    
+    if (gameInput.leftKey.isPressed) {
+        DebugRect.BottomRight.x -= 100 * deltaSeconds;
+    }
+
+    if (gameInput.fireKey.isPressed) {
+        DebugRect.BottomRight.y += 100 * deltaSeconds;
+    }
+    
+    if (gameInput.bombKey.isPressed) {
+        DebugRect.BottomRight.y -= 100 * deltaSeconds;
+    }
+
+
     
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
@@ -741,6 +736,7 @@ int main(int argc, char* argv[]) {
     
     input gameInput = {};
     
+
     //game loop   
     while (doContinue) {
         for (s32 i = 0; i < ARRAY_COUNT(gameInput.keys); i++) {
@@ -1161,7 +1157,11 @@ int main(int argc, char* argv[]) {
                 cursor.color = White_Color;
                 uiWrite(&cursor, "to continue");
             }
-            
+
+            //rect test
+            auto Cursor = uiBeginText(&ui, &defaultFont, ui.width / 2, ui.height / 2, color{0.0f, 1.0f, 1.0f, 1.0f}, 1.0f);
+            uiRect(&ui, Cursor.startX, Cursor.startY, DebugRect.BottomRight.x - DebugRect.TopLeft.x, DebugRect.BottomRight.y - DebugRect.TopLeft.y, color{1.0f, 0.0f, 0.0f, 1.0f}, false);
+            uiWriteWithBorder(&Cursor, DebugRect, Align_Left, "ABC\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA %i", 1);          
             glDisable(GL_BLEND);
             glDisable(GL_TEXTURE_2D);
             glDisable(GL_ALPHA_TEST);

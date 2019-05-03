@@ -5,6 +5,12 @@
 #include "SDL_opengl.h"
 #include <stdarg.h>
 
+enum Text_Align
+{
+    Align_Left,
+    Align_Center,
+    Align_Right
+};
 
 //color
 union color {
@@ -26,6 +32,11 @@ color lerp(color a, color b, f32 t) {
     
 	return result;
 }
+
+struct histogram {
+    f32 values[10 * 60];
+    u32 currentIndex;
+};
 
 struct ui_context {
     s32 width, height;
@@ -230,6 +241,44 @@ void uiWrite(ui_text_cursor *cursor, const char *format, ...) {
     va_end(parameters);
 }
 
+void UiTextWithBorder(ui_text_cursor *cursor,Rect Border, const char *text, u32 TextCount, Text_Align Alignment) {
+    const char *CurrentLine = "";
+    f32 maxLineLength = Border.BottomRight.x - Border.TopLeft.x;
+    f32 CurrentLineLength = 0.0f;
+    f32 maxLines = Border.TopLeft.y - Border.BottomRight.y;
+
+    for (u32 i = 0; i < TextCount; i++) {
+        glyph *fontGlyph = cursor->font->glyphs + text[i];
+
+        if((text[i] == '\n') || (CurrentLineLength + fontGlyph->drawXAdvance * cursor->scale) >= maxLineLength) {
+            cursor->currentY -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
+            
+            maxLines -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
+            if (maxLines <= 0)
+                return;
+
+            cursor->currentX = cursor->startX;
+            CurrentLine = "";
+            CurrentLineLength = 0.0f;
+        }
+        
+        uiTexturedRect(cursor->context, cursor->font->texture, cursor->currentX + fontGlyph->drawXOffset * cursor->scale, cursor->currentY + fontGlyph->drawYOffset * cursor->scale, fontGlyph->width * cursor->scale, fontGlyph->height * cursor->scale, fontGlyph->x, fontGlyph->y, fontGlyph->width, fontGlyph->height,  cursor->color);
+        cursor->currentX += fontGlyph->drawXAdvance * cursor->scale;
+        CurrentLineLength += fontGlyph->drawXAdvance * cursor->scale; 
+    }    
+}
+
+void uiWriteWithBorder(ui_text_cursor *cursor, Rect Border, Text_Align Alignment, const char *format,  ...){
+    va_list parameters;
+    va_start(parameters, format);
+    char buffer[2048];
+    
+    u32 byteCount = vsnprintf(ARRAY_WITH_COUNT(buffer), format, parameters);
+    UiTextWithBorder(cursor, Border, buffer, byteCount, Alignment);
+    
+    va_end(parameters);
+}
+
 void uiBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, color emptyColor, color fullColor) {
     
     uiRect(ui, x, y, width, height, emptyColor, false);
@@ -336,5 +385,31 @@ texture loadTexture(const char *path, GLenum filter = GL_LINEAR){
     SDL_FreeSurface(textureSurface);
     return result;
 }
+
+void drawHistogram(histogram h) {
+    glBegin(GL_LINES);
+    
+    f32 maxValue = 0;
+    
+    for(u32 i = 0; i < (ARRAY_COUNT(h.values)); i++) {
+        if (h.values[i] > maxValue) {
+            maxValue = h.values[i]; 
+        }
+    }
+    
+    f32 scale = 0.5 / 60;
+    
+    for(u32 i = 0; i < (ARRAY_COUNT(h.values) - 1); i++) {
+        glVertex2f( i * (2 / (f32) ARRAY_COUNT(h.values)) - 1, h.values[i] * scale);
+        glVertex2f((i + 1) * (2 / (f32) ARRAY_COUNT(h.values)) - 1, h.values[i + 1] * scale);
+    } 
+    
+    glColor4f(0.0f, 1.0f, 0.0f, 1.0f);
+    glVertex2f(-1, scale * 60);
+    glVertex2f(1, scale * 60);
+    
+    glEnd();
+}
+
 
 #endif // RENDER_H
