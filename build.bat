@@ -1,3 +1,5 @@
+@echo off
+
 rem /LIBPATH:"3rdparty/SDL2-2.0.9/lib/x64"
 set mode=debug
 rem set mode=release

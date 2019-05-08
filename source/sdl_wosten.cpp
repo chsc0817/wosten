@@ -18,7 +18,7 @@
 
 
 
-Rect DebugRect = MakeRect(100.0f, 300.0f, 150.0f, 100.0f);
+rect DebugRect = MakeRect(100.0f, 300.0f, 150.0f, 100.0f);
 
 
 
@@ -149,7 +149,7 @@ Mix_Chunk *loadChunk(int sfxEnum) {
 }
 
 void update(game_state *state, f32 deltaSeconds){    
-
+    
     collision collisions[1024];
     u32 collisionCount = 0;
     auto buffer = &state->entities;
@@ -516,24 +516,6 @@ void editModeUpdate(game_state *gameState, f32 deltaSeconds, input gameInput, f3
     if (gameInput.downKey.isPressed) {
         gameState->Level.Time -= 3 * deltaSeconds;
     }
-
-    if (gameInput.rightKey.isPressed) {
-        DebugRect.BottomRight.x += 100 * deltaSeconds;
-    }
-    
-    if (gameInput.leftKey.isPressed) {
-        DebugRect.BottomRight.x -= 100 * deltaSeconds;
-    }
-
-    if (gameInput.fireKey.isPressed) {
-        DebugRect.BottomRight.y += 100 * deltaSeconds;
-    }
-    
-    if (gameInput.bombKey.isPressed) {
-        DebugRect.BottomRight.y -= 100 * deltaSeconds;
-    }
-
-
     
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
@@ -641,12 +623,12 @@ int main(int argc, char* argv[]) {
     usize ok = SDL_RWread(op, data, byteCount, 1);
     assert (ok == 1);
     
-    stbtt_fontinfo stbfont;
-    stbtt_InitFont(&stbfont, data, stbtt_GetFontOffsetForIndex(data,0));
+    stbtt_fontinfo StbFont;
+    stbtt_InitFont(&StbFont, data, stbtt_GetFontOffsetForIndex(data,0));
     
-    f32 scale = stbtt_ScaleForPixelHeight(&stbfont, 23);
+    f32 scale = stbtt_ScaleForPixelHeight(&StbFont, 23);
     s32 ascent;
-    stbtt_GetFontVMetrics(&stbfont, &ascent,0,0);
+    stbtt_GetFontVMetrics(&StbFont, &ascent,0,0);
     s32 baseline = (s32) (ascent*scale);
     
     const s32 bitmapWidth = 512;
@@ -654,44 +636,44 @@ int main(int argc, char* argv[]) {
     s32 xOffset = 0;
     s32 yOffset = 0;
     s32 maxHight = 0;
-    font defaultFont = {};
+    font DefaultFont = {};
     
     //    while (text[ch]) 
     
     for (u32 i = ' '; i < 256; i++) {   
-        glyph *fontGlyph = defaultFont.glyphs + i;
-        fontGlyph->code = i;
+        glyph *FontGlyph = DefaultFont.Glyphs + i;
+        FontGlyph->Code = i;
         
         s32 unscaledXAdvance;  
-        stbtt_GetCodepointHMetrics(&stbfont, fontGlyph->code, &unscaledXAdvance, &fontGlyph->drawXOffset);
-        fontGlyph->drawXAdvance = unscaledXAdvance * scale;
+        stbtt_GetCodepointHMetrics(&StbFont, FontGlyph->Code, &unscaledXAdvance, &FontGlyph->DrawXOffset);
+        FontGlyph->DrawXAdvance = unscaledXAdvance * scale;
         
         s32 x0, x1, y0, y1;
-        stbtt_GetCodepointBitmapBox(&stbfont, fontGlyph->code, scale, scale, &x0, &y0, &x1, &y1);
-        fontGlyph->width = x1 - x0;
-        fontGlyph->height = y1 - y0;
-        fontGlyph->drawXOffset = x0;
+        stbtt_GetCodepointBitmapBox(&StbFont, FontGlyph->Code, scale, scale, &x0, &y0, &x1, &y1);
+        FontGlyph->Width = x1 - x0;
+        FontGlyph->Height = y1 - y0;
+        FontGlyph->DrawXOffset = x0;
         // y0 is top corner, but its also negative ...
         // we draw from bottom left corner
-        fontGlyph->drawYOffset = -y0 - fontGlyph->height;
-        if ((xOffset + fontGlyph->width) >= bitmapWidth) {
+        FontGlyph->DrawYOffset = -y0 - FontGlyph->Height;
+        if ((xOffset + FontGlyph->Width) >= bitmapWidth) {
             xOffset = 0;
             yOffset += maxHight + 1;
             maxHight = 0;
         }
-        assert(fontGlyph->width <= bitmapWidth);
+        assert(FontGlyph->Width <= bitmapWidth);
         
-        stbtt_MakeCodepointBitmap(&stbfont, bitmap + xOffset + yOffset * bitmapWidth, fontGlyph->width, fontGlyph->height, bitmapWidth, scale, scale, fontGlyph->code);
-        fontGlyph->x = xOffset;
+        stbtt_MakeCodepointBitmap(&StbFont, bitmap + xOffset + yOffset * bitmapWidth, FontGlyph->Width, FontGlyph->Height, bitmapWidth, scale, scale, FontGlyph->Code);
+        FontGlyph->X = xOffset;
         // we flip the texture so we need to change the y to the inverse
-        fontGlyph->y = bitmapWidth - yOffset - fontGlyph->height;
-        xOffset += fontGlyph->width + 1;
-        maxHight = MAX(maxHight, fontGlyph->height);
-        defaultFont.maxGlyphWidth = MAX(defaultFont.maxGlyphWidth, fontGlyph->width);
-        defaultFont.maxGlyphHeight = MAX(defaultFont.maxGlyphHeight, fontGlyph->height);
+        FontGlyph->Y = bitmapWidth - yOffset - FontGlyph->Height;
+        xOffset += FontGlyph->Width + 1;
+        maxHight = MAX(maxHight, FontGlyph->Height);
+        DefaultFont.MaxGlyphWidth = MAX(DefaultFont.MaxGlyphWidth, FontGlyph->Width);
+        DefaultFont.MaxGlyphHeight = MAX(DefaultFont.MaxGlyphHeight, FontGlyph->Height);
     }
     
-    defaultFont.texture = loadTexture(bitmap, bitmapWidth, bitmapWidth, 1, GL_NEAREST);    
+    DefaultFont.Texture = loadTexture(bitmap, bitmapWidth, bitmapWidth, 1, GL_NEAREST);    
     
     f32 worldHeightOverWidth = 3.0f / 4.0f; 
     f32 worldCameraHeight = 2.0f;  
@@ -736,7 +718,7 @@ int main(int argc, char* argv[]) {
     
     input gameInput = {};
     
-
+    
     //game loop   
     while (doContinue) {
         for (s32 i = 0; i < ARRAY_COUNT(gameInput.keys); i++) {
@@ -1130,9 +1112,9 @@ int main(int argc, char* argv[]) {
             
             //boss hp
             if (boss) {
-                auto cursor = uiBeginText(&ui, &defaultFont, 20, ui.height - 90);
-                uiWrite(&cursor, "BOSS ");
-                uiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
+                auto cursor = uiBeginText(&ui, &DefaultFont, 20, ui.height - 90);
+                UiWrite(&cursor, "BOSS ");
+                UiWrite(&cursor, "hp: %i / %i", boss->hp, boss->maxHp);
                 
                 uiBar(&ui, 20, ui.height - 60, ui.width - 40, 40, boss->hp / (f32) boss->maxHp, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
             }
@@ -1142,26 +1124,38 @@ int main(int argc, char* argv[]) {
             
             //game over
             if(gameState.isGameover) {   
-                auto cursor = uiBeginText(&ui, &defaultFont, ui.width / 2, ui.height / 2, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
-                uiWrite(&cursor, 
+                auto cursor = uiBeginText(&ui, &DefaultFont, ui.width / 2, ui.height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
+                UiWrite(&cursor, 
                         "Game Over");
                 
-                cursor.color = White_Color;
-                cursor.scale = 1.0f;
-                uiWrite(&cursor, "\n"
+                cursor.Color = White_Color;
+                cursor.Scale = 1.0f;
+                UiWrite(&cursor, "\n"
                         "press ");
                 
-                cursor.color = color {0.0f, 1.0f, 0.0f, 1.0f};
-                uiWrite(&cursor, "Enter ");
+                cursor.Color = color {0.0f, 1.0f, 0.0f, 1.0f};
+                UiWrite(&cursor, "Enter ");
                 
-                cursor.color = White_Color;
-                uiWrite(&cursor, "to continue");
+                cursor.Color = White_Color;
+                UiWrite(&cursor, "to continue");
             }
-
+            
             //rect test
-            auto Cursor = uiBeginText(&ui, &defaultFont, ui.width / 2, ui.height / 2, color{0.0f, 1.0f, 1.0f, 1.0f}, 1.0f);
-            uiRect(&ui, Cursor.startX, Cursor.startY, DebugRect.BottomRight.x - DebugRect.TopLeft.x, DebugRect.BottomRight.y - DebugRect.TopLeft.y, color{1.0f, 0.0f, 0.0f, 1.0f}, false);
-            uiWriteWithBorder(&Cursor, DebugRect, Align_Left, "ABC\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA %i", 1);          
+            char *Items[] = {
+                "New Game",
+                "Settings",
+                "High Score", 
+                "Quit Game"};
+            auto Cursor = uiBeginText(&ui, &DefaultFont, ui.width / 2, ui.height / 2, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 4.0f);
+            for (s32 i = ARRAY_COUNT(Items) - 1; i >= 0; i--) {
+                
+                
+                uiRect(&ui, Cursor.CurrentX - 2, Cursor.CurrentY - 2, 5, 5, color{0.5f, 1.0f, 0.2f, 1.0f}, true);
+                auto Rect = UiAlignedWrite(Cursor, vec2{0.5f, 0.0f}, Items[i]);
+                
+                uiRect(&ui, Rect.BottomLeft.x, Rect.BottomLeft.y, Rect.TopRight.x - Rect.BottomLeft.x, Rect.TopRight.y - Rect.BottomLeft.y, color{1.0f, 0.0f, 0.0f, 1.0f}, false);
+                Cursor.CurrentY += 20 * Cursor.Scale + Rect.TopRight.y - Rect.BottomLeft.y;
+            }
             glDisable(GL_BLEND);
             glDisable(GL_TEXTURE_2D);
             glDisable(GL_ALPHA_TEST);

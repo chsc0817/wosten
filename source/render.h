@@ -48,26 +48,29 @@ struct texture {
 };
 
 struct glyph {
-    u32 code;
-    s32 drawXAdvance;
-    s32 drawXOffset, drawYOffset;
-    s32 x,y,width,height;
+    u32 Code;
+    s32 DrawXAdvance;
+    s32 DrawXOffset, DrawYOffset;
+    s32 X, Y, Width, Height;
 };
 
 struct font {
-    texture texture;
-    glyph glyphs[256];
-    s32 maxGlyphHeight, maxGlyphWidth;
-    s32 baselineYOffset;
+    texture Texture;
+    glyph Glyphs[256];
+    s32 MaxGlyphHeight, MaxGlyphWidth;
+    s32 BaselineYOffset;
 };
 
 struct ui_text_cursor {
-    ui_context *context;
-    font *font;
-    f32 scale;
-    s32 startX, startY;
-    s32 currentX, currentY;
-    color color;
+    ui_context *Context;
+    font *Font;
+    f32 Scale;
+    s32 StartX, StartY;
+    s32 CurrentX, CurrentY;
+    rect Rect;
+    bool RectIsInitialized;
+    bool DoRender;
+    color Color;
 };
 
 
@@ -199,64 +202,115 @@ void uiTexturedRect(ui_context *ui, texture texture, s32 x, s32 y, s32 width, s3
     glEnd();
 }
 
-ui_text_cursor uiBeginText(ui_context *ui, font *currentFont,  s32 x, s32 y, color color = White_Color, f32 scale = 1.0f) {
-    ui_text_cursor result;
-    result.context = ui;
-    result.startX = x;
-    result.startY = y;
-    result.currentX = x;
-    result.currentY = y;
-    result.font = currentFont;
-    result.scale = scale;
-    result.color = color;
+ui_text_cursor uiBeginText(ui_context *Context, font *CurrentFont,  s32 X, s32 Y, bool DoRender = true, color Color = White_Color, f32 Scale = 1.0f) {
+    ui_text_cursor Result;
+    Result.Context = Context;
+    Result.StartX = X;
+    Result.StartY = Y;
+    Result.CurrentX = X;
+    Result.CurrentY = Y;
+    Result.Font = CurrentFont;
+    Result.Scale = Scale;
+    Result.Color = Color;
+    Result.DoRender = DoRender;
+    Result.Rect = MakeRect(X, Y, X, Y);
+    Result.RectIsInitialized = false;
     
-    return result;
+    return Result;
 }
 
-void uiText(ui_text_cursor *cursor, const char *text, u32 textCount) {
-    for (u32 i = 0; i < textCount; i++) {
-        if(text[i] == '\n') {
-            cursor->currentX = cursor->startX;
-            cursor->currentY -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
+void UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
+    for (u32 i = 0; i < TextCount; i++) {
+        if(Text[i] == '\n') {
+            Cursor->CurrentX = Cursor->StartX;
+            Cursor->CurrentY -= (Cursor->Font->MaxGlyphHeight + 1) *Cursor->Scale;
         }
         
-        glyph *fontGlyph = cursor->font->glyphs + text[i];
-        if (fontGlyph->code == 0) {
+        glyph *FontGlyph = Cursor->Font->Glyphs + Text[i];
+        if (FontGlyph->Code == 0) {
             continue;
         }
         
-        uiTexturedRect(cursor->context, cursor->font->texture, cursor->currentX + fontGlyph->drawXOffset * cursor->scale, cursor->currentY + fontGlyph->drawYOffset * cursor->scale, fontGlyph->width * cursor->scale, fontGlyph->height * cursor->scale, fontGlyph->x, fontGlyph->y, fontGlyph->width, fontGlyph->height,  cursor->color);
-        cursor->currentX += fontGlyph->drawXAdvance * cursor->scale;
+        vec2 BottomLeft = {
+            Cursor->CurrentX + FontGlyph->DrawXOffset * Cursor->Scale,
+            Cursor->CurrentY + FontGlyph->DrawYOffset * Cursor->Scale};
+        
+        vec2 TopRight = {
+            BottomLeft.x + FontGlyph->Width * Cursor->Scale,
+            BottomLeft.y + FontGlyph->Height * Cursor->Scale};
+        
+        rect GlyphRect = MakeRect(BottomLeft, TopRight);
+        
+        if (Cursor->RectIsInitialized) { 
+            Cursor->Rect = Merge(GlyphRect, Cursor->Rect);
+        }
+        else {
+            Cursor->Rect = GlyphRect;
+            Cursor->RectIsInitialized = true;
+        } 
+        
+        if (Cursor->DoRender) {
+            uiTexturedRect(Cursor->Context, Cursor->Font->Texture, BottomLeft.x, BottomLeft.y, FontGlyph->Width * Cursor->Scale, FontGlyph->Height * Cursor->Scale, FontGlyph->X, FontGlyph->Y, FontGlyph->Width, FontGlyph->Height,  Cursor->Color);
+        }
+        
+        Cursor->CurrentX += FontGlyph->DrawXAdvance * Cursor->Scale;
     }
 }
 
-void uiWrite(ui_text_cursor *cursor, const char *format, ...) {
-    va_list parameters;
-    va_start(parameters, format);
-    char buffer[2048];
+void UiWriteVA(ui_text_cursor *Cursor, const char *Format, va_list Parameters) {
+    char Buffer[2048];
     
-    u32 byteCount = vsnprintf(ARRAY_WITH_COUNT(buffer), format, parameters);
-    uiText(cursor, buffer, byteCount);
-    
-    va_end(parameters);
+    u32 ByteCount = vsnprintf(ARRAY_WITH_COUNT(Buffer), Format, Parameters);
+    UiText(Cursor, Buffer, ByteCount);
 }
 
+void UiWrite(ui_text_cursor *Cursor, const char *Format, ...) {
+    va_list Parameters;
+    va_start(Parameters, Format);
+    UiWriteVA(Cursor, Format, Parameters);
+    va_end(Parameters);
+}
+
+rect UiAlignedWrite(ui_text_cursor Cursor, vec2 Alignment, const char *Format, ...) {
+    
+    auto DummyCursor = uiBeginText(Cursor.Context, Cursor.Font, Cursor.CurrentX, Cursor.CurrentY, false, White_Color, Cursor.Scale);
+    
+    va_list Parameters;
+    va_start(Parameters, Format);
+    
+    UiWriteVA(&DummyCursor, Format, Parameters); 
+    
+    
+    vec2 DummySize = DummyCursor.Rect.TopRight - DummyCursor.Rect.BottomLeft;
+    vec2 Offset = vec2{(f32) Cursor.CurrentX, (f32)Cursor.CurrentY} - DummyCursor.Rect.BottomLeft - DummySize * Alignment;
+    
+    DummyCursor.Rect.BottomLeft = DummyCursor.Rect.BottomLeft + Offset;
+    DummyCursor.Rect.TopRight = DummyCursor.Rect.TopRight + Offset;
+    
+    Cursor = uiBeginText(Cursor.Context, Cursor.Font, Cursor.CurrentX + Offset.x, Cursor.CurrentY + Offset.y, Cursor.DoRender, Cursor.Color, Cursor.Scale);
+    UiWriteVA(&Cursor, Format, Parameters); 
+    
+    va_end(Parameters);
+    
+    return DummyCursor.Rect;
+}
+/*
 void UiTextWithBorder(ui_text_cursor *cursor,Rect Border, const char *text, u32 TextCount, Text_Align Alignment) {
     const char *CurrentLine = "";
     f32 maxLineLength = Border.BottomRight.x - Border.TopLeft.x;
     f32 CurrentLineLength = 0.0f;
     f32 maxLines = Border.TopLeft.y - Border.BottomRight.y;
-
+    
     for (u32 i = 0; i < TextCount; i++) {
         glyph *fontGlyph = cursor->font->glyphs + text[i];
-
+        
         if((text[i] == '\n') || (CurrentLineLength + fontGlyph->drawXAdvance * cursor->scale) >= maxLineLength) {
             cursor->currentY -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
             
             maxLines -= (cursor->font->maxGlyphHeight + 1) *cursor->scale;
             if (maxLines <= 0)
                 return;
-
+                
             cursor->currentX = cursor->startX;
             CurrentLine = "";
             CurrentLineLength = 0.0f;
@@ -278,7 +332,7 @@ void uiWriteWithBorder(ui_text_cursor *cursor, Rect Border, Text_Align Alignment
     
     va_end(parameters);
 }
-
+*/
 void uiBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, color emptyColor, color fullColor) {
     
     uiRect(ui, x, y, width, height, emptyColor, false);

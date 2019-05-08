@@ -33,43 +33,37 @@ struct vec2 {
     f32 x, y;
 };
 
-union Rect {
-    struct {
-        f32 x1, y1;
-        f32 x2, y2;
-    };
-
-    struct {
-        vec2 TopLeft;
-        vec2 BottomRight;    
-    };
+struct rect {
+    vec2 BottomLeft;
+    vec2 TopRight;    
 };
 
-//return rectangle with x as top left point and y as right bottom 
-Rect MakeRect (f32 x1, f32 y1, f32 x2, f32 y2) {
-    Rect result = {};
-    if ((x1 == x2) || (y1 == y2))
-        return result;
-
-    if (y1 > y2) {
-        result.x1 = x1;
-        result.y1 = y1;
-        result.x2 = x2;
-        result.y2 = y2;
-    }
-    else {
-        result.x1 = x2;
-        result.y1 = y2;
-        result.x2 = x1;
-        result.y2 = y1;
-    }
-
-    return result;
+rect MakeRect(f32 Left, f32 Bottom, f32 Right, f32 Top) {
+    rect Result;
+    Result.BottomLeft = {Left, Bottom};
+    Result.TopRight = {Right, Top};
+    
+    return Result;
 }
 
-Rect MakeRect(vec2 Point1, vec2 Point2) {
-    return MakeRect(Point1.x, Point1.y, Point2.x, Point2.y);
+rect MakeRect(vec2 BottomLeft, vec2 TopRight) {
+    rect Result;
+    Result.BottomLeft = BottomLeft;
+    Result.TopRight = TopRight;
+    
+    return Result;
 }
+
+rect Merge(rect A, rect B) {
+    rect Result;
+    Result.BottomLeft.x = MIN(A.BottomLeft.x, B.BottomLeft.x);
+    Result.BottomLeft.y = MIN(A.BottomLeft.y, B.BottomLeft.y);
+    Result.TopRight.x = MAX(A.TopRight.x, B.TopRight.x);
+    Result.TopRight.y = MAX(A.TopRight.y, B.TopRight.y);
+    
+    return Result;
+}
+
 
 //vector operations
 vec2 operator* (vec2 a, f32 scale) {
