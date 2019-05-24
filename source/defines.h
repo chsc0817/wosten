@@ -2,13 +2,22 @@
 #if !defined DEFINES_H
 #define DEFINES_H
 
+// FLT_MAX
+#include <cfloat> 
+
 #define  u8 uint8_t
 #define u32 uint32_t
 #define u64 uint64_t
-#define f32 float
+
 #define s32 int32_t 
 #define s64 int64_t 
+
 #define usize size_t
+
+#define f32 float
+
+#define f32_min -FLT_MAX
+#define f32_max  FLT_MAX
 
 #define assert(condition) { \
     if (!(condition)) {\
@@ -17,15 +26,15 @@
     } \
 }
 
-#define ABS(a)   (a >= 0 ? a : -a)
-#define MAX(a,b) (a > b ? a : b)
-#define MIN(a,b) (a < b ? a : b)
-#define CLAMP(a, min, max) ((min > a) ? min : (max < a ? max : a))
+#define ABS(a)   ((a) >= 0 ? (a) : -(a))
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+#define CLAMP(a, min, max) (((min) > (a)) ? (min) : ((max) < (a) ? (max) : (a)))
 
-#define ARRAY_COUNT(array) (sizeof(array) / sizeof(array[0]))
-#define ARRAY_WITH_COUNT(array) array, ARRAY_COUNT(array)
+#define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define ARRAY_WITH_COUNT(array) (array), ARRAY_COUNT(array)
 
-#define FLAG(bit) (1 << bit)
+#define FLAG(bit) (1 << (bit))
 
 #define PI 3.14159265359
 
@@ -33,9 +42,19 @@ struct vec2 {
     f32 x, y;
 };
 
-struct rect {
-    vec2 BottomLeft;
-    vec2 TopRight;    
+union rect
+{
+    struct
+    {
+        vec2 BottomLeft;
+        vec2 TopRight;
+    };
+
+    struct
+    {
+        f32 Left, Bottom;
+        f32 Right, Top;
+    };
 };
 
 rect MakeRect(f32 Left, f32 Bottom, f32 Right, f32 Top) {
@@ -46,12 +65,39 @@ rect MakeRect(f32 Left, f32 Bottom, f32 Right, f32 Top) {
     return Result;
 }
 
+rect MakeRectWithSize(f32 Left, f32 Bottom, f32 Width, f32 Height) {
+    rect Result;
+    Result.BottomLeft = {Left, Bottom};
+    Result.TopRight   = {Left + Width, Bottom + Height};
+    
+    return Result;
+}
+
+
 rect MakeRect(vec2 BottomLeft, vec2 TopRight) {
     rect Result;
     Result.BottomLeft = BottomLeft;
     Result.TopRight = TopRight;
     
     return Result;
+}
+
+rect MakeEmptyRect()
+{
+    rect Result;
+    Result.Left   = f32_max;
+    Result.Bottom = f32_max;
+    Result.Right  = f32_min;
+    Result.Top    = f32_min;
+    return Result;
+}
+
+bool IsValid(rect Result)
+{
+    return ((Result.Left != f32_max) &&
+        (Result.Bottom != f32_max) &&
+        (Result.Right != f32_min) &&
+        (Result.Top != f32_min));
 }
 
 rect Merge(rect A, rect B) {
@@ -64,6 +110,10 @@ rect Merge(rect A, rect B) {
     return Result;
 }
 
+bool Contains(rect Rect, vec2 Point)
+{
+    return ((Rect.BottomLeft.x <= Point.x) && (Point.x <= Rect.TopRight.x) && (Rect.BottomLeft.y <= Point.y) && (Point.y <= Rect.TopRight.y));      
+}
 
 //vector operations
 vec2 operator* (vec2 a, f32 scale) {
@@ -86,6 +136,15 @@ vec2 operator+ (vec2 a, vec2 b) {
     vec2 result;
     result.x = a.x + b.x;
     result.y = a.y + b.y;
+    
+    return result;
+}
+
+
+vec2 operator+ (vec2 a, f32 b) {
+    vec2 result;
+    result.x = a.x + b;
+    result.y = a.y + b;
     
     return result;
 }
@@ -139,15 +198,13 @@ struct transform {
     f32 scale;
 };
 
-vec2 transformPoint(transform t, vec2 point, f32 heightOverWidth) {
+vec2 TransformPoint(transform t, vec2 point) {
     vec2 result;
     f32 cosRotation = cos(t.rotation);
     f32 sinRotation = sin(t.rotation);
     
     result.x = (cosRotation * point.x - sinRotation * point.y) * t.scale + t.pos.x;
     result.y = (sinRotation * point.x + cosRotation * point.y) * t.scale + t.pos.y;
-    
-    result.x *= heightOverWidth;
     
     return result;
 }

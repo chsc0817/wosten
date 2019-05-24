@@ -12,7 +12,6 @@ enum Text_Align
     Align_Right
 };
 
-//color
 union color {
     struct {
         f32 r, g, b, a;
@@ -38,13 +37,47 @@ struct histogram {
     u32 currentIndex;
 };
 
-struct ui_context {
-    s32 width, height;
+struct camera
+{
+    f32 HeightOverWidth;
+    vec2 WorldPosition;
 };
 
+vec2 WorldToCanvasPoint(camera Camera, vec2 WorldPoint){
+    vec2 Result = WorldPoint - Camera.WorldPosition;
+    Result.x *= Camera.HeightOverWidth; 
+
+    return Result;
+}
+
+vec2 CanvasToWorldPoint(camera Camera, vec2 CanvasPoint){
+    CanvasPoint.x *= 1.0f / Camera.HeightOverWidth;
+    CanvasPoint = CanvasPoint + Camera.WorldPosition;
+
+    return CanvasPoint;
+}
+
 struct texture {
-    s32 width, height;
-    GLuint object;
+    s32 Width, Height;
+    GLuint Object;
+};
+
+struct textures {
+    //doesn't include bomb texture or font
+    texture LevelLayer1;
+    texture LevelLayer2;
+    texture PlayerTexture;
+    texture BossTexture;
+    texture FlyTexture;
+    texture BulletTexture;
+    texture BulletPoweredUpTexture;
+    texture BulletMaxPoweredUpTexture;
+    texture BombCountTexture;
+    texture PowerupTexture;
+    
+    // UI
+    texture IdleButtonTexture;
+    texture HotButtonTexture;
 };
 
 struct glyph {
@@ -61,6 +94,11 @@ struct font {
     s32 BaselineYOffset;
 };
 
+struct ui_context {
+    font *CurrentFont;
+    s32 width, height;
+};
+
 struct ui_text_cursor {
     ui_context *Context;
     font *Font;
@@ -73,22 +111,21 @@ struct ui_text_cursor {
     color Color;
 };
 
-
-void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
+void drawQuad(camera Camera, transform xForm, vec2 center = {0.5f, 0.5f}){
 	
     glBegin(GL_QUADS);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     
-    vec2 v = transformPoint(xForm, vec2{0, 0} - center, heightOverWidth);
+    vec2 v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 0} - center));
     glVertex2f(v.x, v.y);
     
-    v= transformPoint(xForm, vec2{1, 0} - center, heightOverWidth);
+    v= WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{1, 0} - center));
     glVertex2f(v.x, v.y);
     
-    v = transformPoint(xForm, vec2{1, 1} - center, heightOverWidth);
+    v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{1, 1} - center));
     glVertex2f(v.x, v.y);
     
-    v = transformPoint(xForm, vec2{0, 1} - center, heightOverWidth);
+    v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 1} - center));
     glVertex2f(v.x, v.y);
     
     glEnd();
@@ -96,45 +133,117 @@ void drawQuad(transform xForm, f32 heightOverWidth, vec2 center = {0.5f, 0.5f}){
 
 const f32 Default_World_Units_Per_Texel = 0.01f;
 
-void drawTexturedQuad(transform xForm, f32 heightOverWidth, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_World_Units_Per_Texel, f32 z = 0, f32 doFlip = 0.0f){
+void drawTexturedQuad(camera Camera, transform xForm, texture fillTexture, color fillColor = White_Color, vec2 relativeCenter = {0.5f, 0.5f}, f32 texelScale = Default_World_Units_Per_Texel, f32 z = 0, f32 doFlip = 0.0f){
     
-    vec2 texelSize = vec2{1.0f / fillTexture.width, 1.0f / fillTexture.height};
-    vec2 quadSize = vec2{(f32) fillTexture.width, (f32) fillTexture.height} * texelScale;
+    vec2 texelSize = vec2{1.0f / fillTexture.Width, 1.0f / fillTexture.Height};
+    vec2 quadSize = vec2{(f32) fillTexture.Width, (f32) fillTexture.Height} * texelScale;
     vec2 center = quadSize * relativeCenter;
     
     
-    glBindTexture(GL_TEXTURE_2D, fillTexture.object);
+    glBindTexture(GL_TEXTURE_2D, fillTexture.Object);
     
     glBegin(GL_QUADS);
     glColor4fv(fillColor.values);
     //assuming our textures are flipped        
     
     glTexCoord2f(0, lerp(0, 1, doFlip));  	
-    vec2 v = transformPoint(xForm, vec2{0, 0} - center, heightOverWidth);
+    vec2 v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 0} - center));
     glVertex3f(v.x, v.y, z);    
     
     glTexCoord2f(1, lerp(0, 1, doFlip));
-    v= transformPoint(xForm, vec2{quadSize.x, 0} - center, heightOverWidth);
+    v= WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{quadSize.x, 0} - center));
     glVertex3f(v.x, v.y, z);
 	
     glTexCoord2f(1, lerp(1, 0, doFlip));
-    v = transformPoint(xForm, quadSize - center, heightOverWidth);
+    v = WorldToCanvasPoint(Camera, TransformPoint(xForm, quadSize - center));
     glVertex3f(v.x, v.y, z);
 	
     glTexCoord2f(0, lerp(1, 0, doFlip));
-    v = transformPoint(xForm, vec2{0, quadSize.y} - center, heightOverWidth);
+    v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, quadSize.y} - center));
     glVertex3f(v.x, v.y, z);
     
     glEnd();
 }
 
-vec2 uiToGl (ui_context *ui, s32 x, s32 y){
-    vec2 result;
+void drawCircle(camera Camera, transform xForm, color fillColor = {0.7f, 0.0f, 0.0f, 1.0f}, bool isFilled = true, u32 n = 16, f32 z = 0) {
+    if (isFilled) {
+        glBegin(GL_TRIANGLE_FAN);
+        glColor4f(fillColor.r, fillColor.g, fillColor.b, fillColor.a);
+        
+        vec2 v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 0}));
+        glVertex3f(v.x, v.y, z);
+        
+        for (u32 i = 0; i < n + 1; i++) { 
+            xForm.rotation = i * ((2 * PI) / n); 
+            v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 0.5f}));
+            glVertex3f(v.x, v.y, z);        
+        }   
+    }
+    else {
+        glBegin(GL_LINE_LOOP);
+        glColor4f(fillColor.r, fillColor.g, fillColor.b, fillColor.a);
+        
+        for (u32 i = 0; i < n + 1; i++) { 
+            xForm.rotation = i * ((2 * PI) / n); 
+            auto v = WorldToCanvasPoint(Camera, TransformPoint(xForm, vec2{0, 0.5f}));
+            glVertex3f(v.x, v.y, z);        
+        }   
+    }
     
-    result.x = (2.0f * x / ui->width) - 1.0f;
-    result.y = (2.0f * y / ui->height) - 1.0f;
+    glEnd();
+}
+
+void drawLine(camera Camera, transform xForm, vec2 from, vec2 to, color lineColor) {
+    glBegin(GL_LINES);
+    
+    glColor4fv(lineColor.values);
+    
+    vec2 v = WorldToCanvasPoint(Camera, TransformPoint(xForm, from));
+    glVertex2f(v.x, v.y);
+    
+    v = WorldToCanvasPoint(Camera, TransformPoint(xForm, to));
+    glVertex2f(v.x, v.y);
+    
+    glEnd();
+}
+
+vec2 UiToCanvasPoint(ui_context *ui, vec2 UiPoint){
+    vec2 result = (UiPoint * vec2{ 2.0f / ui->width, 2.0f / ui->height }) + -1.0f;
     
     return result;
+}
+
+vec2 UiToCanvasPoint(ui_context *ui, s32 x, s32 y){
+    return UiToCanvasPoint(ui, vec2{ (f32)x, (f32)y });
+}
+
+vec2 CanvasToUiPoint(ui_context *ui, vec2 CanvasPoint){
+    vec2 result = ((CanvasPoint + 1) * vec2{(f32) ui->width, (f32) ui->height}) * 0.5f;
+  
+    return result;
+}
+
+void UiBegin()
+{
+    glEnable(GL_TEXTURE_2D);
+    
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GEQUAL, 0.1f);
+    
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+}
+
+void UiEnd()
+{
+    //glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+    //glDisable(GL_ALPHA_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void uiRect(ui_context *ui, s32 x, s32 y, s32 width, s32 height, color rectColor, bool isFilled = true){
@@ -150,59 +259,64 @@ void uiRect(ui_context *ui, s32 x, s32 y, s32 width, s32 height, color rectColor
     
     glColor4fv(rectColor.values);        
     
-    vec2 v = uiToGl(ui, x, y);
-    glVertex2f(v.x, v.y);
+    vec2 v = UiToCanvasPoint(ui, x, y);
+    glVertex3f(v.x, v.y, -0.9f);
     
-    v = uiToGl(ui, x + width, y);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x + width, y);
+    glVertex3f(v.x, v.y, -0.9f);
     
-    v = uiToGl(ui, x + width, y + height);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x + width, y + height);
+    glVertex3f(v.x, v.y, -0.9f);
     
-    v = uiToGl(ui, x, y + height);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x, y + height);
+    glVertex3f(v.x, v.y, -0.9f);
     
     glEnd();
-    
 }
 
+void UiRect(ui_context *Ui, rect Rect, color RectColor, bool IsFilled = true) { 
+    uiRect(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, RectColor, IsFilled);
+}
 
-void uiTexturedRect(ui_context *ui, texture texture, s32 x, s32 y, s32 width, s32 height, s32 subTextureX, s32 subTextureY, s32 subTextureWidth, s32 subTextureHeight, color rectColor)
-{
-    glBindTexture(GL_TEXTURE_2D, texture.object);
+void uiTexturedRect(ui_context *ui, texture texture, s32 x, s32 y, s32 width, s32 height, s32 subTextureX, s32 subTextureY, s32 subTextureWidth, s32 subTextureHeight, color rectColor = White_Color) {
+    glBindTexture(GL_TEXTURE_2D, texture.Object);
     glEnable(GL_TEXTURE_2D);
     
     glBegin(GL_QUADS);
     glColor4fv(rectColor.values);        
     vec2 uv = {
-        subTextureX / (f32) texture.width,
-        subTextureY / (f32) texture.height
+        subTextureX / (f32) texture.Width,
+        subTextureY / (f32) texture.Height
     };
     vec2 uvSize = {
-        subTextureWidth / (f32) texture.width,
-        subTextureHeight / (f32) texture.height
+        subTextureWidth / (f32) texture.Width,
+        subTextureHeight / (f32) texture.Height
     };
     
     glTexCoord2f(uv.x, uv.y);  	
-    vec2 v = uiToGl(ui, x, y);
-    glVertex2f(v.x, v.y);
+    vec2 v = UiToCanvasPoint(ui, x, y);
+    glVertex3f(v.x, v.y, -0.9f);
     
     glTexCoord2f(uv.x + uvSize.x, uv.y);  	
-    v = uiToGl(ui, x + width, y);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x + width, y);
+    glVertex3f(v.x, v.y, -0.9f);
     
     glTexCoord2f(uv.x + uvSize.x, uv.y + uvSize.y);  	
-    v = uiToGl(ui, x + width, y + height);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x + width, y + height);
+    glVertex3f(v.x, v.y, -0.9f);
     
     glTexCoord2f(uv.x, uv.y + uvSize.y);  	
-    v = uiToGl(ui, x, y + height);
-    glVertex2f(v.x, v.y);
+    v = UiToCanvasPoint(ui, x, y + height);
+    glVertex3f(v.x, v.y, -0.9f);
 	
     glEnd();
 }
 
-ui_text_cursor uiBeginText(ui_context *Context, font *CurrentFont,  s32 X, s32 Y, bool DoRender = true, color Color = White_Color, f32 Scale = 1.0f) {
+void UiTexturedRect(ui_context *Ui, texture Texture, rect Rect, rect SubTextureRect, color RectColor = White_Color) {
+    uiTexturedRect(Ui, Texture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, SubTextureRect.Left, SubTextureRect.Bottom, SubTextureRect.Right - SubTextureRect.Left, SubTextureRect.Top - SubTextureRect.Bottom, RectColor);
+} 
+
+ui_text_cursor uiBeginText(ui_context *Context, font *CurrentFont, s32 X, s32 Y, bool DoRender = true, color Color = White_Color, f32 Scale = 1.0f) {
     ui_text_cursor Result;
     Result.Context = Context;
     Result.StartX = X;
@@ -219,7 +333,10 @@ ui_text_cursor uiBeginText(ui_context *Context, font *CurrentFont,  s32 X, s32 Y
     return Result;
 }
 
-void UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
+rect UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
+
+    rect TextRect = MakeEmptyRect();
+
     for (u32 i = 0; i < TextCount; i++) {
         if(Text[i] == '\n') {
             Cursor->CurrentX = Cursor->StartX;
@@ -241,13 +358,7 @@ void UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
         
         rect GlyphRect = MakeRect(BottomLeft, TopRight);
         
-        if (Cursor->RectIsInitialized) { 
-            Cursor->Rect = Merge(GlyphRect, Cursor->Rect);
-        }
-        else {
-            Cursor->Rect = GlyphRect;
-            Cursor->RectIsInitialized = true;
-        } 
+        TextRect = Merge(TextRect, GlyphRect);
         
         if (Cursor->DoRender) {
             uiTexturedRect(Cursor->Context, Cursor->Font->Texture, BottomLeft.x, BottomLeft.y, FontGlyph->Width * Cursor->Scale, FontGlyph->Height * Cursor->Scale, FontGlyph->X, FontGlyph->Y, FontGlyph->Width, FontGlyph->Height,  Cursor->Color);
@@ -255,20 +366,32 @@ void UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
         
         Cursor->CurrentX += FontGlyph->DrawXAdvance * Cursor->Scale;
     }
+
+    if (Cursor->RectIsInitialized) { 
+        Cursor->Rect = Merge(Cursor->Rect, TextRect);
+    }
+    else {
+        Cursor->Rect = TextRect;
+        Cursor->RectIsInitialized = IsValid(TextRect);
+    } 
+
+    return TextRect;
 }
 
-void UiWriteVA(ui_text_cursor *Cursor, const char *Format, va_list Parameters) {
+rect UiWriteVA(ui_text_cursor *Cursor, const char *Format, va_list Parameters) {
     char Buffer[2048];
     
     u32 ByteCount = vsnprintf(ARRAY_WITH_COUNT(Buffer), Format, Parameters);
-    UiText(Cursor, Buffer, ByteCount);
+    return UiText(Cursor, Buffer, ByteCount);
 }
 
-void UiWrite(ui_text_cursor *Cursor, const char *Format, ...) {
+rect UiWrite(ui_text_cursor *Cursor, const char *Format, ...) {
     va_list Parameters;
     va_start(Parameters, Format);
-    UiWriteVA(Cursor, Format, Parameters);
+    auto Result = UiWriteVA(Cursor, Format, Parameters);
     va_end(Parameters);
+
+    return Result;
 }
 
 rect UiAlignedWrite(ui_text_cursor Cursor, vec2 Alignment, const char *Format, ...) {
@@ -340,49 +463,6 @@ void uiBar(ui_context *ui, s32 x, s32 y, s32 width, s32 height, f32 percentage, 
     
 }
 
-void drawCircle(transform xForm, f32 heightOverWidth, color fillColor = {0.7f, 0.0f, 0.0f, 1.0f}, bool isFilled = true, u32 n = 16, f32 z = 0) {
-    if (isFilled) {
-        glBegin(GL_TRIANGLE_FAN);
-        glColor4f(fillColor.r, fillColor.g, fillColor.b, fillColor.a);
-        
-        vec2 v = transformPoint(xForm, vec2{0, 0}, heightOverWidth);
-        glVertex3f(v.x, v.y, z);
-        
-        for (u32 i = 0; i < n + 1; i++) { 
-            xForm.rotation = i * ((2 * PI) / n); 
-            v = transformPoint(xForm, vec2{0, 0.5f}, heightOverWidth);
-            glVertex3f(v.x, v.y, z);		
-        }	
-    }
-    else {
-        glBegin(GL_LINE_LOOP);
-        glColor4f(fillColor.r, fillColor.g, fillColor.b, fillColor.a);
-        
-        for (u32 i = 0; i < n + 1; i++) { 
-            xForm.rotation = i * ((2 * PI) / n); 
-            auto v = transformPoint(xForm, vec2{0, 0.5f}, heightOverWidth);
-            glVertex3f(v.x, v.y, z);		
-        }	
-    }
-	
-	glEnd();
-}
-
-void drawLine(transform xForm, f32 heightOverWidth, vec2 from, vec2 to, color lineColor) {
-    glBegin(GL_LINES);
-    
-    glColor4fv(lineColor.values);
-    
-	vec2 v = transformPoint(xForm, from, heightOverWidth);
-	glVertex2f(v.x, v.y);
-    
-    v = transformPoint(xForm, to, heightOverWidth);
-	glVertex2f(v.x, v.y);
-    
-    glEnd();
-}
-
-
 texture loadTexture(u8 *data, s32 width, s32 height, u8 bytesPerPixel, GLenum filter = GL_LINEAR, bool flipY = true)
 {
     if (flipY)
@@ -402,8 +482,8 @@ texture loadTexture(u8 *data, s32 width, s32 height, u8 bytesPerPixel, GLenum fi
     
     texture result;
     
-    glGenTextures(1, &result.object);
-    glBindTexture(GL_TEXTURE_2D, result.object);
+    glGenTextures(1, &result.Object);
+    glBindTexture(GL_TEXTURE_2D, result.Object);
     
     switch(bytesPerPixel) {
         case 1: {
@@ -420,8 +500,8 @@ texture loadTexture(u8 *data, s32 width, s32 height, u8 bytesPerPixel, GLenum fi
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
     
-    result.width = width;
-    result.height = height;
+    result.Width = width;
+    result.Height = height;
     
     return result;
 }
