@@ -78,6 +78,7 @@ struct textures {
     // UI
     texture IdleButtonTexture;
     texture HotButtonTexture;
+    texture DeleteButtonTexture;
 };
 
 struct glyph {

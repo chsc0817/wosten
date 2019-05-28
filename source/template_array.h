@@ -27,16 +27,21 @@ struct template_array_name {
 };
 
 
-template_array_data_type * Push(template_array_name *buffer){
-    if (buffer->Count < buffer->Capacity) {
-        auto result = buffer->Base + ((buffer->Count)++);
+template_array_data_type *Push(template_array_name *Buffer){
+    if (Buffer->Count < Buffer->Capacity) {
+        auto Result = Buffer->Base + ((Buffer->Count)++);
         
-        return result;
+        return Result;
     }
     
     return NULL;
 }
 
+void Pop(template_array_name *Buffer){
+    if (Buffer->Count > 0) {
+        (Buffer->Count)--;
+    }
+}
 
 #else
 

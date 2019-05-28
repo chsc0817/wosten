@@ -168,6 +168,7 @@ struct game_state {
     level Level;
     camera Camera;
     mode Mode;    
+    bool DeleteButtonSelected;
     texture bombTexture;
 };
 
@@ -290,6 +291,10 @@ void DrawEntity(game_state *State, textures Textures, entity *Entity){
         case Entity_Type_Powerup: {
             drawTexturedQuad(State->Camera, Entity->xForm, Textures.PowerupTexture, White_Color, Entity->relativeDrawCenter);
         } break;
+
+        default: {
+            drawTexturedQuad(State->Camera, Entity->xForm, Textures.FlyTexture, White_Color, Entity->relativeDrawCenter);     
+        }
     }    
 }
 
@@ -331,15 +336,14 @@ void initGame (game_state *gameState, entity **player) {
     (*player)->relativeDrawCenter = vec2 {0.5f, 0.4f};  
 };
 
-void UpdateTitle(game_state *State, f32 DeltaSeconds){
-     #if 0
+void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, textures Textures, font DefaultFont, bool *DoContinue){
             char *Items[] = {
+                "New game",
                 "Load Game",
-                "Settings",
-                "new game", 
+                "Settings",                 
                 "Quit Game"
             };
-            auto Cursor = uiBeginText(&ui, &DefaultFont, ui.width / 2, ui.height / 2, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
+            auto Cursor = uiBeginText(Ui, &DefaultFont, Ui->width * 0.5f, Ui->height * 0.7f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
             
             for (u32 i = 0; i < ARRAY_COUNT(Items); i++) {
                 //uiRect(&ui, Cursor.CurrentX - 2, Cursor.CurrentY - 2, 5, 5, color{0.5f, 1.0f, 0.2f, 1.0f}, true);
@@ -351,57 +355,57 @@ void UpdateTitle(game_state *State, f32 DeltaSeconds){
                     Rect = UiWrite(&DummyCursor, Items[i]);
                 }
                 
-                f32 border = Cursor.Scale * 15;
-                auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - DefaultFont.BaselineYOffset * Cursor.Scale - border, 0, DefaultFont.MaxGlyphHeight * Cursor.Scale + 2 * border);
+                f32 Border = Cursor.Scale * 15;
+                auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - DefaultFont.BaselineYOffset * Cursor.Scale - Border, 0, DefaultFont.MaxGlyphHeight * Cursor.Scale + 2 * Border);
                 Rect = Merge(Rect, MinRect);
                 
-                Rect.Left  -= border;
-                Rect.Right += border;
+                Rect.Left  -= Border;
+                Rect.Right += Border;
                 
                 auto offset = (Rect.Right - Rect.Left) * 0.5f;
                 Rect.Left  -= offset;
                 Rect.Right -= offset;
                 
-                u64 Id = i + 1;
+                u64 Id = UI_ID(i);
                 
                 f32 CursorYOffset = 0;
                 
-                if (UiControl.ActiveId == Id)
-                {
+                if (UiControl->ActiveId == Id) {
                     Cursor.Color = color{ 1.0f, 0.5f, 0.0f, 1.0f };
                 }
-                else if (UiControl.HotId == Id)
-                {
+                else if (UiControl->HotId == Id) {
                     Cursor.Color = color{ 0.95f, 0.95f, 0.0f, 1.0f };
                 }
-                else
-                {
+                else {
                     Cursor.Color = color{ 1.0f, 1.0f, 1.0f, 1.0f };            
                     Rect.Top += Cursor.Scale * 4;
                     CursorYOffset = Cursor.Scale * 4;
                 }
                 
-                //auto Rect = UiAlignedWrite(Cursor, vec2{0.5f, 0.0f}, Items[i]);
-                
-                if (UiButton(&UiControl, Id, Rect))
-                {
-                    printf("you selected %s\n", Items[i]);
+                if (UiButton(UiControl, Id, Rect)) {
+                    switch (i) {
+
+                        case 0: { State->Mode = Mode_Game;
+                        } break;
+
+                        case 3: { *DoContinue = false;
+                        } break;
+                        default: printf("you selected %s\n", Items[i]);
+                    }
                 }
                 
-                //                uiRect(&ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, color{0.95f, 0.95f, 0.95f, 1.0f}, true);
-                
-                if ((UiControl.ActiveId == Id) || (UiControl.HotId == Id))
-                    uiTexturedRect(&ui, HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, HotButtonTexture.Width, HotButtonTexture.Height, White_Color);
+                if ((UiControl->ActiveId == Id) || (UiControl->HotId == Id))
+                    uiTexturedRect(Ui, Textures.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, Textures.HotButtonTexture.Width, Textures.HotButtonTexture.Height, White_Color);
                 else
-                    uiTexturedRect(&ui, IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, IdleButtonTexture.Width, IdleButtonTexture.Height, White_Color);
+                    uiTexturedRect(Ui, Textures.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, Textures.IdleButtonTexture.Width, Textures.IdleButtonTexture.Height, White_Color);
                 
                 Cursor.CurrentX -= offset;
                 Cursor.CurrentY += CursorYOffset;
+                UiBegin();
                 UiWrite(&Cursor, "%s\n", Items[i]);
-                
-                Cursor.CurrentY -= 20 * Cursor.Scale + 2 * border + CursorYOffset;
+                UiEnd();
+                Cursor.CurrentY -= 20 * Cursor.Scale + 2 * Border + CursorYOffset;
             }
-            #endif
 }
 
 void UpdateEditor(game_state *GameState, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, textures Textures) {
@@ -430,10 +434,23 @@ void UpdateEditor(game_state *GameState, ui_context *Ui, ui_control *UiControl, 
             Info->Blueprint = MakeChicken(GameState->Camera.WorldPosition);
         }
     }
+    rect DeleteRect = MakeRectWithSize(20, 80, 60, 60);
 
-    UiEnd();
+    if (UiButton(UiControl, UI_ID0, DeleteRect)) {
+        GameState->DeleteButtonSelected = !GameState->DeleteButtonSelected;
+    }
 
-    for (u32 SpawnIndex = 0; SpawnIndex < GameState->Level.SpawnInfos.Count; SpawnIndex++) {
+    if (GameState->DeleteButtonSelected) {
+        UiTexturedRect(Ui, Textures.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, Textures.DeleteButtonTexture.Width, Textures.DeleteButtonTexture.Height), color{1.0f, 0.2f, 0.2f, 1.0f});
+    }
+    else {
+        UiTexturedRect(Ui, Textures.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, Textures.DeleteButtonTexture.Width, Textures.DeleteButtonTexture.Height));
+    } 
+
+    u32 SpawnIndex = 0;
+    
+
+    while (SpawnIndex < GameState->Level.SpawnInfos.Count) {
         auto Info = GameState->Level.SpawnInfos.Base + SpawnIndex;
         transform CollisionTransform = Info->Blueprint.xForm;
         CollisionTransform.scale = 2 * Info->Blueprint.collisionRadius;
@@ -441,7 +458,7 @@ void UpdateEditor(game_state *GameState, ui_context *Ui, ui_control *UiControl, 
 
         glEnable(GL_TEXTURE_2D);
         DrawEntity(GameState, Textures, &Info->Blueprint);
-        UiBegin();
+        glDisable(GL_TEXTURE_2D);
         // collision center
         auto CanvasPoint = WorldToCanvasPoint(GameState->Camera, Info->Blueprint.xForm.pos);
         auto UiPoint = CanvasToUiPoint(Ui, CanvasPoint);
@@ -465,23 +482,37 @@ void UpdateEditor(game_state *GameState, ui_context *Ui, ui_control *UiControl, 
             Color = { 0.6f, 0.23f, 0.6234f, 1.0f };
         }
 
-        auto Cursor = uiBeginText(Ui, Ui->CurrentFont, Ui->width * 0.5f, Ui->height * 0.5f);
-        UiWrite(&Cursor, "center: %f, %f", Info->Blueprint.xForm.pos.x, Info->Blueprint.xForm.pos.y);
-
         uiRect(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, Color, false);
-        
+       
         vec2 DeltaPosition;
         UiDragable(UiControl, Id, Rect, &DeltaPosition);
         
+        //drag or delete selected entity
         if (UiControl->ActiveId == Id)
         {
-            UiPoint = UiPoint + DeltaPosition;
-            auto NewCenterCanvasPoint = UiToCanvasPoint(Ui, UiPoint);
-            Info->Blueprint.xForm.pos = CanvasToWorldPoint(GameState->Camera, NewCenterCanvasPoint);
+            if(GameState->DeleteButtonSelected) {
+                GameState->Level.SpawnInfos[SpawnIndex] = GameState->Level.SpawnInfos[GameState->Level.SpawnInfos.Count - 1];
+                Pop(&GameState->Level.SpawnInfos);  
+
+                UiControl->ActiveId = NULL;
+            }
+            else {
+                auto Cursor = uiBeginText(Ui, Ui->CurrentFont, Ui->width * 0.5f, Ui->height * 0.5f);
+                UiWrite(&Cursor, "center: %f , \n %f", Info->Blueprint.xForm.pos.x, Info->Blueprint.xForm.pos.y);
+
+
+                UiPoint = UiPoint + DeltaPosition;
+                auto NewCenterCanvasPoint = UiToCanvasPoint(Ui, UiPoint);
+                Info->Blueprint.xForm.pos = CanvasToWorldPoint(GameState->Camera, NewCenterCanvasPoint);
+            }
         }
+
+        SpawnIndex++;
         
-        UiEnd();
+        
     }
+
+    UiEnd();
 }
 
 void updateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaSeconds, entity *Player,  Mix_Music *bgm, font DefaultFont, textures Textures){
@@ -818,7 +849,8 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     {
         *chickenSpawnCooldown -= DeltaSeconds;
         
-        if(*chickenSpawnCooldown <= 0) {
+        if(0){
+        //if(*chickenSpawnCooldown <= 0) {
             //unleash the chicken!
             entity *chicken = nextEntity(entities);
             
@@ -1104,6 +1136,8 @@ int main(int argc, char* argv[]) {
     // UI
     Textures.IdleButtonTexture = loadTexture("data/Kenney/PNG/blue_button02.png");
     Textures.HotButtonTexture = loadTexture("data/Kenney/PNG/blue_button03.png");
+    Textures.DeleteButtonTexture = loadTexture("data/Kenney/PNG/grey_boxCross.png");
+    
     
     SDL_RWops* op = SDL_RWFromFile("C:/Windows/Fonts/Arial.ttf", "rb");
     s64 byteCount = op->size(op);
@@ -1171,7 +1205,7 @@ int main(int argc, char* argv[]) {
     
     entity _entitieEntries[100];
     game_state gameState = {};
-    gameState.Mode = Mode_Game;
+    gameState.Mode = Mode_Title;
     gameState.Level.Duration = 30.0f;
     gameState.Level.Time = 0.0f;
     gameState.Level.LayersWorldUnitsPerPixels[0] = worldWidth / Textures.LevelLayer1.Width;
@@ -1179,6 +1213,7 @@ int main(int argc, char* argv[]) {
     gameState.Level.WorldHeight = gameState.Level.LayersWorldUnitsPerPixels[0] * Textures.LevelLayer1.Height;  
     gameState.entities = { ARRAY_WITH_COUNT(_entitieEntries) };
     gameState.bombTexture = loadTexture("data/Kenney/particlePackCircle.png");
+    gameState.DeleteButtonSelected = false;
     entity *player;
     
     /*
@@ -1352,7 +1387,7 @@ int main(int argc, char* argv[]) {
         //game update
         switch (gameState.Mode) {
             case Mode_Title: {
-                UpdateTitle(&gameState, DeltaSeconds);   
+                UpdateTitle(&gameState, &ui, &UiControl, DeltaSeconds, GameInput,  Textures, DefaultFont, &doContinue);   
             } break;
 
             case Mode_Game: {
