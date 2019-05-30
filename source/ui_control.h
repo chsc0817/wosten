@@ -15,13 +15,13 @@ struct ui_control
 {
 	vec2 Cursor;
 	bool CursorWasPressed, CursorWasReleased;
-
+    
 	u64 HotId;
 	u64 ActiveId;
-
+    
 	u64 NextHotId;
 	u32 NextHotIdPriority;
-
+    
 	vec2 DragCursorStart;
 };
 
@@ -30,7 +30,7 @@ void UiFrameStart(ui_control *Control, vec2 Cursor, bool CursorWasPressed, bool 
 	Control->Cursor = Cursor;
 	Control->CursorWasPressed = CursorWasPressed;
 	Control->CursorWasReleased = CursorWasReleased;
-
+    
 	if (Control->ActiveId == UiInvalidId)
 	{
 		Control->HotId = Control->NextHotId;
@@ -39,7 +39,7 @@ void UiFrameStart(ui_control *Control, vec2 Cursor, bool CursorWasPressed, bool 
 	{
 		Control->HotId = UiInvalidId;
 	}
-
+    
 	Control->NextHotId = UiInvalidId;
 	Control->NextHotIdPriority = -1;
 }
@@ -47,18 +47,18 @@ void UiFrameStart(ui_control *Control, vec2 Cursor, bool CursorWasPressed, bool 
 bool UiButton(ui_control *Control, u64 Id, rect Rect, u32 Priority = 0)
 {
 	assert(Id != UiInvalidId);
-
+    
 	bool IsHot = Contains(Rect, Control->Cursor);
-
+    
 	if (IsHot && (Priority < Control->NextHotIdPriority)) {
 		Control->NextHotId = Id;
 		Control->NextHotIdPriority = Priority;
 	}
-
+    
 	if (Control->ActiveId == Id) {
 		if (Control->CursorWasReleased) {
 			Control->ActiveId = UiInvalidId;
-
+            
 			if (IsHot)
 				return true;
 		}
@@ -67,40 +67,38 @@ bool UiButton(ui_control *Control, u64 Id, rect Rect, u32 Priority = 0)
 			Control->ActiveId = Id;
 		}
 	}
-
+    
 	return false;
 }
 
 bool UiDragable(ui_control *Control, u64 Id, rect Rect, vec2 *DeltaPosition, u32 Priority = 0)
 {
 	assert(Id != UiInvalidId);
-
+    
 	bool IsHot = Contains(Rect, Control->Cursor);
-
+    
 	if (IsHot && (Priority < Control->NextHotIdPriority)) {
 		Control->NextHotId = Id;
 		Control->NextHotIdPriority = Priority;
 	}
-
+    
 	if (Control->ActiveId == Id) {
 		*DeltaPosition = Control->Cursor - Control->DragCursorStart;
 		Control->DragCursorStart = Control->Cursor;
-
+        
 		if (Control->CursorWasReleased) {
 			Control->ActiveId = UiInvalidId;
-
-			return true;
 		}
 	} else {
 		*DeltaPosition = {};
-
+        
 		if ((Control->HotId == Id) && Control->CursorWasPressed) {
 			Control->ActiveId = Id;
 			Control->DragCursorStart = Control->Cursor;			
 		}
 	}
-
-	return false;
+    
+	return (Control->ActiveId == Id);
 }
 
 // qt:

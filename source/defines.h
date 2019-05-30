@@ -39,7 +39,7 @@
 #define PI 3.14159265359
 
 struct vec2 {
-    f32 x, y;
+    f32 X, Y;
 };
 
 union rect
@@ -102,129 +102,129 @@ bool IsValid(rect Result)
 
 rect Merge(rect A, rect B) {
     rect Result;
-    Result.BottomLeft.x = MIN(A.BottomLeft.x, B.BottomLeft.x);
-    Result.BottomLeft.y = MIN(A.BottomLeft.y, B.BottomLeft.y);
-    Result.TopRight.x = MAX(A.TopRight.x, B.TopRight.x);
-    Result.TopRight.y = MAX(A.TopRight.y, B.TopRight.y);
+    Result.BottomLeft.X = MIN(A.BottomLeft.X, B.BottomLeft.X);
+    Result.BottomLeft.Y = MIN(A.BottomLeft.Y, B.BottomLeft.Y);
+    Result.TopRight.X = MAX(A.TopRight.X, B.TopRight.X);
+    Result.TopRight.Y = MAX(A.TopRight.Y, B.TopRight.Y);
     
     return Result;
 }
 
 bool Contains(rect Rect, vec2 Point)
 {
-    return ((Rect.BottomLeft.x <= Point.x) && (Point.x <= Rect.TopRight.x) && (Rect.BottomLeft.y <= Point.y) && (Point.y <= Rect.TopRight.y));      
+    return ((Rect.BottomLeft.X <= Point.X) && (Point.X <= Rect.TopRight.X) && (Rect.BottomLeft.Y <= Point.Y) && (Point.Y <= Rect.TopRight.Y));      
 }
 
 //vector operations
-vec2 operator* (vec2 a, f32 scale) {
-    vec2 result;
-    result.x = a.x * scale;
-    result.y = a.y * scale;
+vec2 operator* (vec2 A, f32 Scale) {
+    vec2 Result;
+    Result.X = A.X * Scale;
+    Result.Y = A.Y * Scale;
     
-    return result;
+    return Result;
 }
 
-vec2 operator* (vec2 a, vec2 b) {
-    vec2 result;
-    result.x = a.x * b.x;
-    result.y = a.y * b.y;
+vec2 operator* (vec2 A, vec2 B) {
+    vec2 Result;
+    Result.X = A.X * B.X;
+    Result.Y = A.Y * B.Y;
     
-    return result;
+    return Result;
 }
 
-vec2 operator+ (vec2 a, vec2 b) {
-    vec2 result;
-    result.x = a.x + b.x;
-    result.y = a.y + b.y;
+vec2 operator+ (vec2 A, vec2 B) {
+    vec2 Result;
+    Result.X = A.X + B.X;
+    Result.Y = A.Y + B.Y;
     
-    return result;
+    return Result;
 }
 
 
-vec2 operator+ (vec2 a, f32 b) {
-    vec2 result;
-    result.x = a.x + b;
-    result.y = a.y + b;
+vec2 operator+ (vec2 A, f32 B) {
+    vec2 Result;
+    Result.X = A.X + B;
+    Result.Y = A.Y + B;
     
-    return result;
+    return Result;
 }
 
-vec2 operator- (vec2 a, vec2 b) {
-    vec2 result;
-    result.x = a.x - b.x;
-    result.y = a.y - b.y;
+vec2 operator- (vec2 A, vec2 B) {
+    vec2 Result;
+    Result.X = A.X - B.X;
+    Result.Y = A.Y - B.Y;
     
-    return result;
+    return Result;
 }
 
-vec2 operator- (vec2 a) {
-    vec2 result;
-    result.x = -a.x;
-    result.y = -a.y;
+vec2 operator- (vec2 A) {
+    vec2 Result;
+    Result.X = -A.X;
+    Result.Y = -A.Y;
     
-    return result;
+    return Result;
 }
 
 
-f32 dot(vec2 a, vec2 b) {
-    return (a.x * b.x + a.y * b.y);
+f32 dot(vec2 A, vec2 B) {
+    return (A.X * B.X + A.Y * B.Y);
 }
 
 
-f32 lengthSquared(vec2 a) {
-	return dot(a, a);
+f32 lengthSquared(vec2 A) {
+	return dot(A, A);
 }
 
 
-f32 length(vec2 a) {
-    return sqrt(lengthSquared(a));
+f32 length(vec2 A) {
+    return sqrt(lengthSquared(A));
 }
 
-vec2 normalizeOrZero(vec2 a) {
-    if ((a.x == 0) && (a.y == 0))
+vec2 normalizeOrZero(vec2 A) {
+    if ((A.X == 0) && (A.Y == 0))
         return {};
     
-    vec2 result;
+    vec2 Result;
     
-    result.x = a.x * 1 / (length(a));
-    result.y = a.y * 1 / (length(a));
+    Result.X = A.X * 1 / (length(A));
+    Result.Y = A.Y * 1 / (length(A));
     
-    return result;
+    return Result;
 }
 
 struct transform {
-    vec2 pos;
-    f32 rotation;
-    f32 scale;
+    vec2 Pos;
+    f32 Rotation;
+    f32 Scale;
 };
 
-vec2 TransformPoint(transform t, vec2 point) {
-    vec2 result;
-    f32 cosRotation = cos(t.rotation);
-    f32 sinRotation = sin(t.rotation);
+vec2 TransformPoint(transform T, vec2 Point) {
+    vec2 Result;
+    f32 CosRotation = cos(T.Rotation);
+    f32 SinRotation = sin(T.Rotation);
     
-    result.x = (cosRotation * point.x - sinRotation * point.y) * t.scale + t.pos.x;
-    result.y = (sinRotation * point.x + cosRotation * point.y) * t.scale + t.pos.y;
+    Result.X = (CosRotation * Point.X - SinRotation * Point.Y) * T.Scale + T.Pos.X;
+    Result.Y = (SinRotation * Point.X + CosRotation * Point.Y) * T.Scale + T.Pos.Y;
     
-    return result;
+    return Result;
 }
 
-f32 lerp(f32 a, f32 b, f32 t) {
-    f32 result = (a * (1 - t)) + (b * t);
-    return result;
+f32 lerp(f32 A, f32 B, f32 T) {
+    f32 Result = (A * (1 - T)) + (B * T);
+    return Result;
 }
 
 //geometry
 struct circle{
-	vec2 pos;
-	f32 radius;
+	vec2 Pos;
+	f32 Radius;
 };
 
-bool areIntersecting(circle a, circle b) {
-    f32 combinedRadius = a.radius + b.radius;
-    vec2 distance = a.pos - b.pos;
+bool areIntersecting(circle A, circle B) {
+    f32 CombinedRadius = A.Radius + B.Radius;
+    vec2 Distance = A.Pos - B.Pos;
     
-    return (combinedRadius * combinedRadius >= lengthSquared(distance));
+    return (CombinedRadius * CombinedRadius >= lengthSquared(Distance));
 }
 
 
