@@ -132,6 +132,16 @@ vec2 operator* (vec2 A, vec2 B) {
     return Result;
 }
 
+
+vec2 operator/ (vec2 A, vec2 B) {
+    assert((B.X != 0.0f) && (B.Y != 0.0f));
+    vec2 Result;
+    Result.X = A.X / B.X;
+    Result.Y = A.Y / B.Y;
+    
+    return Result;
+}
+
 vec2 operator+ (vec2 A, vec2 B) {
     vec2 Result;
     Result.X = A.X + B.X;

@@ -101,18 +101,36 @@ bool UiDragable(ui_control *Control, u64 Id, rect Rect, vec2 *DeltaPosition, u32
 	return (Control->ActiveId == Id);
 }
 
-// qt:
 
-// onClick() { ,.,. }
+bool UiRatio(ui_control *Control, u64 Id, rect Rect, vec2 *Ratio, u32 Priority = 0)
+{
+	assert(Id != UiInvalidId);
+    
+	bool IsHot = Contains(Rect, Control->Cursor);
+    
+	if (IsHot && (Priority < Control->NextHotIdPriority)) {
+		Control->NextHotId = Id;
+		Control->NextHotIdPriority = Priority;
+	}
+    
+	if (Control->ActiveId == Id) {
+		*Ratio = (Control->Cursor - Rect.BottomLeft) / (Rect.TopRight - Rect.BottomLeft);
+		Ratio->X = CLAMP(Ratio->X, 0, 1);
+		Ratio->Y = CLAMP(Ratio->Y, 0, 1);
 
-// FloatSlider.GetValue();
-
-
-// imGUI:
-
-// if (ui_click(ui, cursor)) { ... }
-
-// ui_float_slider(ui, &value);
+		if (Control->CursorWasReleased) {
+			Control->ActiveId = UiInvalidId;
+		}
+	} else {
+		
+		if ((Control->HotId == Id) && Control->CursorWasPressed) {
+			Control->ActiveId = Id;
+			Control->DragCursorStart = Control->Cursor;			
+		}
+	}
+    
+	return (Control->ActiveId == Id);
+}
 
 #undef UI_FILE_ID
 #endif // UI_CONTROL_H

@@ -1,3 +1,5 @@
+// #define DEBUG_UI
+
 #include "SDL.h"
 #include <stdio.h>
 #include "SDL_opengl.h"
@@ -20,18 +22,19 @@
 
 #define TRANSFORM_IDENTITY {{}, 0.0f, 1.0f}
 
+f32 WorldHeightOverWidth = 3.0f / 4.0f;
 f32 WorldCameraHeight = 2.0f;  
 //rect DebugRect = MakeRect(100.0f, 300.0f, 150.0f, 100.0f);
 
-enum mode
-{
+enum mode {
     Mode_Title,
+    Mode_Settings,
     Mode_Game,
     Mode_Game_Over,
     Mode_Editor
 };
 
-enum entity_type{
+enum entity_type {
     Entity_Type_Player,
     Entity_Type_Boss,
     Entity_Type_Fly,    
@@ -93,6 +96,17 @@ const f32 Fly_Max_Fire_Interval = 1.7f;
 const f32 Powerup_Collect_Radius = 0.1f;
 const f32 Powerup_Magnet_Speed   = 0.5f;
 
+struct path_point{
+    vec2 Position;
+    f32 Time;
+};
+
+#define template_array_name      path
+#define template_array_data_type path_point
+#define template_array_is_buffer 
+#define template_array_static_count 10
+#include "template_array.h"
+
 struct entity {
     transform XForm;
     f32 CollisionRadius;
@@ -103,12 +117,14 @@ struct entity {
     u32 CollisionTypeMask;
     f32 BlinkTime, BlinkDuration;
     vec2 RelativeDrawCenter;
+    f32 SpawnTime;
     
     union {
         struct {
             f32 FlipCountdown, FlipInterval;
             vec2 Velocity;
             f32 FireCountdown;
+            path Path;
         } fly;
         
         struct {
@@ -143,7 +159,6 @@ struct collision {
 
 struct entity_spawn_info {
     entity Blueprint;
-    f32 SpawnTime;
     bool WasNotSpawned;
 };
 
@@ -152,6 +167,35 @@ struct entity_spawn_info {
 #define template_array_is_buffer 
 #define template_array_static_count 256
 #include "template_array.h"
+
+
+struct assets {
+    //doesn't include bomb texture or font
+    texture LevelLayer1;
+    texture LevelLayer2;
+    texture PlayerTexture;
+    texture BossTexture;
+    texture FlyTexture;
+    texture BulletTexture;
+    texture BulletPoweredUpTexture;
+    texture BulletMaxPoweredUpTexture;
+    texture BombTexture;
+    texture PowerupTexture;
+    
+    // UI
+    texture BombCountTexture;
+    texture IdleButtonTexture;
+    texture HotButtonTexture;
+    texture DeleteButtonTexture;
+    texture AddPathButton;
+
+    font DefaultFont;
+
+    Mix_Music *Bgm;
+    Mix_Chunk *SfxBomb, *SfxDeath, *SfxShoot;
+
+};
+
 
 struct level {
     entity_spawn_infos SpawnInfos;
@@ -164,11 +208,17 @@ struct level {
 // TODO: move all assets into game_state
 struct game_state {
     entity_buffer Entities;
+    entity *Player;
+    f32 BulletSpawnCooldown, ChickenSpawnCooldown;
     level Level;
     camera Camera;
+    f32 WorldWidth;
     mode Mode;    
-    bool DeleteButtonSelected;
-    texture BombTexture;
+    assets Assets;
+    struct {
+        entity_spawn_info *CurrentInfo;     
+        bool DeleteButtonSelected;
+    } Editor;
 };
 
 f32 randZeroToOne(){
@@ -177,19 +227,6 @@ f32 randZeroToOne(){
 
 f32 randMinusOneToOne(){
     return (randZeroToOne() * 2 - 1.0f);
-}
-
-
-Mix_Chunk *loadChunk(int sfxEnum) {
-    switch (sfxEnum) {
-        case Sfx_Death: return Mix_LoadWAV("data/Gravity Sound/Low Health.wav");
-        
-        case Sfx_Bomb: return Mix_LoadWAV("data/Gravity Sound/Level Up 4.wav");
-        
-        case Sfx_Shoot: return Mix_LoadWAV("data/Gravity Sound/Dropping Item 6.wav");
-        
-        default: return NULL;
-    }
 }
 
 level LoadLevel(char *FileName) {
@@ -286,64 +323,72 @@ entity MakeChicken(vec2 WorldPositionOffset) {
     Result.RelativeDrawCenter = vec2 {0.5f, 0.44f};
     Result.BlinkDuration = 0.1f;
     Result.BlinkTime = 0.0f;
-    
+
     return Result;
 }
 
-void DrawEntity(game_state *State, textures Textures, entity *Entity){
+void DrawEntity(game_state *State, entity *Entity, color Color = White_Color){
+    #ifdef DEBUG_UI
+        transform collisionTransform = Entity->XForm;
+        collisionTransform.Scale = 2 * Entity->CollisionRadius;
+        DrawCircle(State->Camera, collisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
+        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
+        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
+    #endif    
+
     switch (Entity->Type) {
         
         case Entity_Type_Player: {
-            DrawTexturedQuad(State->Camera, Entity->XForm, Textures.PlayerTexture, White_Color, Entity->RelativeDrawCenter);
+            DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.PlayerTexture, Color, Entity->RelativeDrawCenter);
         } break; 
         
         case Entity_Type_Bullet: {
             if (Entity->bullet.Damage == 1) {
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.BulletTexture, White_Color, Entity->RelativeDrawCenter);
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BulletTexture, Color, Entity->RelativeDrawCenter);
             } 
             else if (Entity->bullet.Damage == 2){
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.BulletPoweredUpTexture, White_Color, Entity->RelativeDrawCenter);  
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BulletPoweredUpTexture, Color, Entity->RelativeDrawCenter);  
             }
             else {
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.BulletMaxPoweredUpTexture, White_Color, Entity->RelativeDrawCenter);
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BulletMaxPoweredUpTexture, Color, Entity->RelativeDrawCenter);
             }
         } break;
         
         case Entity_Type_Boss: {
             if (Entity->BlinkTime <= 0) {
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.BossTexture, White_Color, Entity->RelativeDrawCenter); 
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BossTexture, Color, Entity->RelativeDrawCenter); 
             } 
             else {
-                color BlinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, Entity->BlinkTime / Entity->BlinkDuration); 
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.BossTexture, BlinkColor, Entity->RelativeDrawCenter);          
+                color BlinkColor = lerp(Color, color{0.0f, 0.0f, 0.2f, 1.0f}, Entity->BlinkTime / Entity->BlinkDuration); 
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BossTexture, BlinkColor, Entity->RelativeDrawCenter);          
             }   
         } break;
         
         case Entity_Type_Fly: {
             if (Entity->BlinkTime <= 0) {
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.FlyTexture, White_Color, Entity->RelativeDrawCenter); 
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.FlyTexture, Color, Entity->RelativeDrawCenter); 
             } 
             else {
-                color BlinkColor = lerp(White_Color, color{0.0f, 0.0f, 0.2f, 1.0f}, Entity->BlinkTime / Entity->BlinkDuration); 
-                DrawTexturedQuad(State->Camera, Entity->XForm, Textures.FlyTexture, BlinkColor, Entity->RelativeDrawCenter);          
+                color BlinkColor = lerp(Color, color{0.0f, 0.0f, 0.2f, 1.0f}, Entity->BlinkTime / Entity->BlinkDuration); 
+                DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.FlyTexture, BlinkColor, Entity->RelativeDrawCenter);          
             }   
         } break;
         
         case Entity_Type_Bomb: {
-            DrawTexturedQuad(State->Camera, Entity->XForm, State->BombTexture, color{randZeroToOne(), randZeroToOne(), randZeroToOne(), 1.0f}, Entity->RelativeDrawCenter);    
+            DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.BombTexture, color{randZeroToOne(), randZeroToOne(), randZeroToOne(), 1.0f}, Entity->RelativeDrawCenter);    
         } break;
         
         case Entity_Type_Powerup: {
-            DrawTexturedQuad(State->Camera, Entity->XForm, Textures.PowerupTexture, White_Color, Entity->RelativeDrawCenter);
+            DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.PowerupTexture, Color, Entity->RelativeDrawCenter);
         } break;
         
         default: {
-            DrawTexturedQuad(State->Camera, Entity->XForm, Textures.FlyTexture, White_Color, Entity->RelativeDrawCenter);     
+            DrawTexturedQuad(State->Camera, Entity->XForm, State->Assets.FlyTexture, Color, Entity->RelativeDrawCenter);     
         }
     }    
 }
 
-void DrawAllEntities(game_state *State, textures Textures) {
+void DrawAllEntities(game_state *State) {
     glEnable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -352,14 +397,14 @@ void DrawAllEntities(game_state *State, textures Textures) {
     
     for (u32 i = 0; i < State->Entities.Count; i++) {
         auto Entity = State->Entities.Base + i;
-        DrawEntity(State, Textures, Entity);
+        DrawEntity(State, Entity);
     }
     
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
 }
 
-void initGame (game_state *State, entity **Player) {
+void initGame (game_state *State) {
     State->Entities.Count = 0;
     for (u32 i = 0; i < State->Level.SpawnInfos.Count; i++) {
         State->Level.SpawnInfos[i].WasNotSpawned = true;
@@ -368,20 +413,20 @@ void initGame (game_state *State, entity **Player) {
     State->Level.Time = 0.0f;
     State->Camera.WorldPosition = { 0.0f, WorldCameraHeight * 0.5f };
     
-    *Player = NextEntity(&State->Entities); 
-    (*Player)->XForm = TRANSFORM_IDENTITY;
-    (*Player)->XForm.Scale = 0.1f;
-    (*Player)->CollisionRadius = (*Player)->XForm.Scale * 0.5;
-    (*Player)->MaxHp = 1;
-    (*Player)->Hp = (*Player)->MaxHp;
-    (*Player)->player.Power = 0;
-    (*Player)->player.Bombs = 3;
-    (*Player)->Type = Entity_Type_Player;
-    (*Player)->CollisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
-    (*Player)->RelativeDrawCenter = vec2 {0.5f, 0.4f};  
+    State->Player = NextEntity(&State->Entities); 
+    State->Player->XForm = TRANSFORM_IDENTITY;
+    State->Player->XForm.Scale = 0.1f;
+    State->Player->CollisionRadius = State->Player->XForm.Scale * 0.5;
+    State->Player->MaxHp = 1;
+    State->Player->Hp = State->Player->MaxHp;
+    State->Player->player.Power = 0;
+    State->Player->player.Bombs = 3;
+    State->Player->Type = Entity_Type_Player;
+    State->Player->CollisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Bullet) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Powerup);
+    State->Player->RelativeDrawCenter = vec2 {0.5f, 0.4f};  
 };
 
-void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, textures Textures, bool *DoContinue){
+void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, bool *DoContinue){
     char *Items[] = {
         "New game",
         "Load Game",
@@ -432,17 +477,21 @@ void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 D
                 
                 case 0: { State->Mode = Mode_Game;
                 } break;
+
+                case 2: { State->Mode = Mode_Settings;
+                } break;
                 
                 case 3: { *DoContinue = false;
                 } break;
+
                 default: printf("you selected %s\n", Items[i]);
             }
         }
         
         if ((UiControl->ActiveId == Id) || (UiControl->HotId == Id))
-            UiTexturedRect(Ui, Textures.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, Textures.HotButtonTexture.Width, Textures.HotButtonTexture.Height, White_Color);
+            UiTexturedRect(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
         else
-            UiTexturedRect(Ui, Textures.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, Textures.IdleButtonTexture.Width, Textures.IdleButtonTexture.Height, White_Color);
+            UiTexturedRect(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
         
         Cursor.CurrentX -= Offset;
         Cursor.CurrentY += CursorYOffset;
@@ -453,7 +502,199 @@ void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 D
     }
 }
 
-void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, textures Textures) {
+void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, SDL_Window *Window) {
+    //Volume
+    UiBegin();
+        //Bgm
+    f32 MinVolPos = Ui->Width * 0.5f - Ui->Width * 0.4f;
+    f32 MaxVolPos = Ui->Width * 0.5f + Ui->Width * 0.2f;
+    f32 VolPosY = Ui->Height  - Ui->Height * 0.3f;
+    rect VolBar = MakeRect(MinVolPos, VolPosY - 15, MaxVolPos, VolPosY + 15);
+
+    f32 CurrentVolPos = (MaxVolPos - MinVolPos) * (Mix_VolumeMusic(-1) / (f32)MIX_MAX_VOLUME) + MinVolPos;
+    //vec2 Delta;
+
+    UiRect(Ui, VolBar, Green_Color, false);
+    UiRect(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
+    
+    ui_text_cursor VolCursor = UiBeginText(Ui, Ui->CurrentFont, VolBar.Right + 10, VolPosY - 15);
+    UiWrite(&VolCursor, "BGM: %d%%", (s32)(100 * (CurrentVolPos - MinVolPos) / (MaxVolPos - MinVolPos)));
+
+    // MIX_MIN_VOLUME == 0
+    f32 DiffToNextVolPos = (MaxVolPos - MinVolPos) / (f32)(MIX_MAX_VOLUME - 0 + 1);
+    
+    if (UiDragable(UiControl, UI_ID0, MakeRect(CurrentVolPos - 10, VolPosY - 15, CurrentVolPos + 10, VolPosY + 15), &vec2{})) {
+        Mix_VolumeMusic((GameInput.MousePos.X - MinVolPos) / DiffToNextVolPos + 0 - 1);
+    }
+
+        //Sfx
+    VolPosY -= 60;
+    VolBar.Bottom -= 60;
+    VolBar.Top -= 60;
+    CurrentVolPos = (MaxVolPos - MinVolPos) * (Mix_Volume(0, -1) / (f32)MIX_MAX_VOLUME) + MinVolPos;
+    
+    UiRect(Ui, VolBar, Green_Color, false);
+    UiRect(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
+    
+    VolCursor = UiBeginText(Ui, Ui->CurrentFont, VolBar.Right + 10, VolPosY - 15);
+    UiWrite(&VolCursor, "SFX: %d%%", 100 * Mix_Volume(0, -1) / MIX_MAX_VOLUME);
+    UiEnd();
+
+    vec2 Ratio;
+    
+    if (UiRatio(UiControl, UI_ID0, VolBar, &Ratio)) {
+        Mix_Volume(0, Ratio.X * MIX_MAX_VOLUME);
+        Mix_PlayChannel(0, State->Assets.SfxBomb, 0);
+    }
+    /*
+    if (UiDragable(UiControl, UI_ID0, MakeRect(CurrentVolPos - 5, VolPosY - 5, CurrentVolPos + 5, VolPosY + 5), &Delta)) {
+       
+        Mix_VolumeMusic(Mix_VolumeMusic(-1) + Delta.X);            
+        CurrentVolPos += Delta.X;
+        if ((CurrentVolPos) > MaxVolPos) {
+            CurrentVolPos = MaxVolPos;
+            Mix_VolumeMusic(MIX_MAX_VOLUME);
+        } else if ((CurrentVolPos) < MinVolPos) {
+            CurrentVolPos = MinVolPos;
+            Mix_VolumeMusic(0);
+        } 
+
+    }
+    UiLine(Ui, CurrentVolPos, VolPosY - 10, CurrentVolPos, VolPosY + 10, Red_Color);
+    */
+
+    //Save Button
+    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.2f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
+    rect Rect;
+    {
+        auto DummyCursor = Cursor;
+        DummyCursor.DoRender = false;
+        Rect = UiWrite(&DummyCursor, "Save");
+    }
+    
+    f32 Border = Cursor.Scale * 15;
+    auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - Ui->CurrentFont->BaselineBottomOffset * Cursor.Scale - Border, 0, Ui->CurrentFont->MaxGlyphHeight * Cursor.Scale + 2 * Border);
+    Rect = Merge(Rect, MinRect);
+    
+    Rect.Left  -= Border;
+    Rect.Right += Border;
+    
+    auto Offset = (Rect.Right - Rect.Left) * 0.5f;
+    Rect.Left  -= Offset;
+    Rect.Right -= Offset;
+    
+    u64 Id = UI_ID0;
+    
+    f32 CursorYOffset = 0;
+    
+    if (UiButton(UiControl, Id, Rect)) {
+        State->Mode = Mode_Title;
+        SaveConfig("data/config.bin", Window);
+    }
+
+    if (UiControl->ActiveId == Id) {
+        Cursor.Color = color{ 1.0f, 0.5f, 0.0f, 1.0f };
+    }
+    else if (UiControl->HotId == Id) {
+        Cursor.Color = color{ 0.95f, 0.95f, 0.0f, 1.0f };
+    }
+    else {
+        Cursor.Color = color{ 1.0f, 1.0f, 1.0f, 1.0f };            
+        Rect.Top += Cursor.Scale * 4;
+        CursorYOffset = Cursor.Scale * 4;
+    }
+
+    if ((UiControl->ActiveId == Id) || (UiControl->HotId == Id))
+        UiTexturedRect(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
+    else
+        UiTexturedRect(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
+        
+
+    Cursor.CurrentX -= Offset;
+    Cursor.CurrentY += CursorYOffset;
+    UiBegin();
+    UiWrite(&Cursor, "%s\n", "Save");
+    UiEnd();
+    Cursor.CurrentY -= 20 * Cursor.Scale + 2 * Border + CursorYOffset;
+}
+
+void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
+    assert(Entity->Type == Entity_Type_Fly);
+    
+    u32 MinPathIndex = Entity->fly.Path.Count;
+    f32 Time = LevelTime - Entity->SpawnTime;
+
+    for (u32 i = Entity->fly.Path.Count; i > 0; i--) {
+        if (Time >= Entity->fly.Path[i - 1].Time) {
+            MinPathIndex = i - 1;
+            break;
+        }
+    }
+
+    if (MinPathIndex == Entity->fly.Path.Count) {
+        Entity->XForm.Pos = Entity->fly.Path[0].Position;
+    }
+    else if (MinPathIndex == (Entity->fly.Path.Count - 1)) {
+        Entity->XForm.Pos = Entity->fly.Path[MinPathIndex].Position;
+    }
+    else { 
+        path_point *CurrentPath = &Entity->fly.Path[MinPathIndex];
+        path_point *NextPath = &Entity->fly.Path[MinPathIndex + 1];
+        f32 l = (Time - CurrentPath->Time) / (NextPath->Time - CurrentPath->Time);
+
+        assert(Time < NextPath->Time);
+
+        Entity->XForm.Pos = vec2{lerp(CurrentPath->Position.X, NextPath->Position.X, l),
+                                 lerp(CurrentPath->Position.Y, NextPath->Position.Y, l)
+                            };
+    }
+                
+}
+
+//assuming path are already in order except last point
+void SortPath(path *Path) {
+    assert(Path->Count > 0);
+
+    path_point Insert = (*Path)[Path->Count - 1];
+
+    u32 InsertIndex = Path->Count - 1;
+    for (u32 i = 0; i < Path->Count - 1; i++) {
+        if ((*Path)[i].Time > Insert.Time) {
+            InsertIndex = i;
+            break;
+        }
+    }
+
+    //remove points that are too close in time
+    if (InsertIndex == Path->Count - 1){
+        if ((Path->Count >= 2) && (ABS((*Path)[Path->Count - 2].Time - Insert.Time) < 0.1f)) {
+            (*Path)[Path->Count - 2] = Insert;
+            Pop(Path);    
+            return;
+        }    
+    } 
+    else if  (ABS((*Path)[InsertIndex].Time - Insert.Time) < 0.1f) {
+        (*Path)[InsertIndex] = Insert;
+        Pop(Path);    
+        return;
+    } 
+
+    for (u32 i = Path->Count - 1; i > InsertIndex; i--) {
+        (*Path)[i] = (*Path)[ i - 1];
+    }
+    (*Path)[InsertIndex] = Insert;
+}
+
+void RemovePathPoint(path *Path, u32 RemoveIndex ) {
+    assert(RemoveIndex < Path->Count);
+
+    for (u32 i = RemoveIndex; i < Path->Count - 1; i++) {
+        (*Path)[i] = (*Path)[i + 1];
+    }
+    Pop(Path);
+}
+
+void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput) {
 #if 0
     if (GameInput.UpKey.IsPressed) {
         State->Level.Time += 3 * DeltaSeconds;
@@ -475,26 +716,81 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     
     if (State->Level.SpawnInfos.Count < State->Level.SpawnInfos.Capacity) {    
         rect FlyBlueprintRect = MakeRectWithSize(20, Ui->Height - 80, 60, 60);
-        UiTexturedRect(Ui, Textures.FlyTexture, FlyBlueprintRect, MakeRectWithSize(0, 0, Textures.FlyTexture.Width, Textures.FlyTexture.Height));  
+        UiTexturedRect(Ui, State->Assets.FlyTexture, FlyBlueprintRect, MakeRectWithSize(0, 0, State->Assets.FlyTexture.Width, State->Assets.FlyTexture.Height));  
         
         if (UiButton(UiControl, UI_ID0, FlyBlueprintRect)) {
             entity_spawn_info *Info = Push(&State->Level.SpawnInfos);
             Info->WasNotSpawned = true;
-            Info->SpawnTime = State->Level.Time;
             Info->Blueprint = MakeChicken(State->Camera.WorldPosition);
+            Info->Blueprint.SpawnTime = State->Level.Time;
+            path_point *Path = Push(&Info->Blueprint.fly.Path);
+            Path->Position = Info->Blueprint.XForm.Pos;
+            Path->Time = 0;
+            State->Editor.CurrentInfo = Info;
         }
     }
+
+    rect AddPathRect =  MakeRectWithSize(20, 160, 60, 60);
+    if (State->Editor.CurrentInfo != NULL) {
+        if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
+            
+            UiTexturedRect(Ui, State->Assets.AddPathButton, AddPathRect, MakeRectWithSize(0, 0, State->Assets.AddPathButton.Width, State->Assets.AddPathButton.Height));
+            auto Info = State->Editor.CurrentInfo;
+            
+            if (UiButton(UiControl, UI_ID0, AddPathRect)) {
+                path_point *PathPoint = Push(&Info->Blueprint.fly.Path);   
+                PathPoint->Position = Info->Blueprint.XForm.Pos;
+                PathPoint->Time = State->Level.Time - Info->Blueprint.SpawnTime;
+                SortPath(&Info->Blueprint.fly.Path);
+            }  
+
+            for (s32 i = 0; i < Info->Blueprint.fly.Path.Count; ++i) {
+              UiEnd();
+                if(i < Info->Blueprint.fly.Path.Count - 1){
+                    DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path[i].Position, Info->Blueprint.fly.Path[i + 1].Position, Blue_Color); 
+                }
+
+                DrawCircle(State->Camera, transform {Info->Blueprint.fly.Path[i].Position, 0.0f, 0.1f}, Blue_Color, false);
+                UiBegin();
+                auto CanvasPoint = WorldToCanvasPoint(State->Camera, Info->Blueprint.fly.Path[i].Position);
+                auto UiPoint = CanvasToUiPoint(Ui, CanvasPoint);
+                auto Cursor = UiBeginText(Ui, Ui->CurrentFont, UiPoint.X - 10, UiPoint.Y - 10, true, Red_Color, 0.3f);
+                UiWrite(&Cursor, "%d", i);
+
+                rect Rect = MakeRect(UiPoint.X - 10, UiPoint.Y - 10, UiPoint.X + 10, UiPoint.Y + 10);
+                //UiRect(Ui, Rect, Red_Color);
+
+                vec2 DeltaPosition;
+
+                if (State->Editor.DeleteButtonSelected) {
+                    if (UiButton(UiControl, UI_ID(i), Rect)) 
+                        RemovePathPoint(&Info->Blueprint.fly.Path, i);
+                    
+                } 
+                else if (UiDragable(UiControl, UI_ID(i), Rect, &DeltaPosition)) {                    
+                    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.5f);
+                    //UiWrite(&Cursor, "center: %f, %f", Info->Blueprint.fly, Info->Blueprint.XForm.Pos.Y);
+                    
+                    UiPoint = UiPoint + DeltaPosition;
+                    auto NewCenterCanvasPoint = UiToCanvasPoint(Ui, UiPoint);
+                    Info->Blueprint.fly.Path[i].Position = CanvasToWorldPoint(State->Camera, NewCenterCanvasPoint);
+                } 
+            }
+        }
+    }
+
+
     rect DeleteRect = MakeRectWithSize(20, 80, 60, 60);
     
     if (UiButton(UiControl, UI_ID0, DeleteRect)) {
-        State->DeleteButtonSelected = !State->DeleteButtonSelected;
+        State->Editor.DeleteButtonSelected = !State->Editor.DeleteButtonSelected;
     }
     
-    if (State->DeleteButtonSelected) {
-        UiTexturedRect(Ui, Textures.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, Textures.DeleteButtonTexture.Width, Textures.DeleteButtonTexture.Height), color{1.0f, 0.2f, 0.2f, 1.0f});
+    if (State->Editor.DeleteButtonSelected) {
+        UiTexturedRect(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height), color{1.0f, 0.2f, 0.2f, 1.0f});
     }
     else {
-        UiTexturedRect(Ui, Textures.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, Textures.DeleteButtonTexture.Width, Textures.DeleteButtonTexture.Height));
+        UiTexturedRect(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height));
     }
     
     
@@ -523,6 +819,21 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     }
     
     UiLine(Ui, TimeLineRect.Left - 20, Y, TimeLineRect.Right + 10, Y, color{1, 0.7f, 0, 1});
+
+    if (State->Editor.CurrentInfo != NULL) {
+
+        if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
+            u32 XPathPoint = TimeLineRect.Left - 20;
+
+            for (s32 i = 0; i < State->Editor.CurrentInfo->Blueprint.fly.Path.Count; i++) {
+                u32 YPathpoint = (State->Editor.CurrentInfo->Blueprint.fly.Path[i].Time / State->Level.Duration) * (TimeLineRect.Top - TimeLineRect.Bottom) + TimeLineRect.Bottom;
+
+                auto Cursor = UiBeginText(Ui, &State->Assets.DefaultFont, XPathPoint, YPathpoint, true, Red_Color, 0.3);
+                UiWrite(&Cursor, "%d", i);
+            }
+        }
+    }
+    
     
     UiAlignedWrite(Cursor, { 1.0f, 1.0f },"Time: %f", State->Level.Time);
     
@@ -531,12 +842,22 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     
     while (SpawnIndex < State->Level.SpawnInfos.Count) {
         auto Info = State->Level.SpawnInfos.Base + SpawnIndex;
+        bool HasSpawned = false;
+
+        if (State->Level.Time >= Info->Blueprint.SpawnTime) {
+            HasSpawned = true;
+
+        }
+        if (Info->Blueprint.Type == Entity_Type_Fly) {
+            UpdateFlyPosition(&Info->Blueprint, State->Level.Time);
+        }
+
         transform CollisionTransform = Info->Blueprint.XForm;
         CollisionTransform.Scale = 2 * Info->Blueprint.CollisionRadius;
         DrawCircle(State->Camera, CollisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false, 16, -0.5f);
-        
+  
         glEnable(GL_TEXTURE_2D);
-        DrawEntity(State, Textures, &Info->Blueprint);
+        DrawEntity(State, &Info->Blueprint, color {1, 1, 1, (HasSpawned ? 1.0f : 0.3f)});
         glDisable(GL_TEXTURE_2D);
         // collision center
         auto CanvasPoint = WorldToCanvasPoint(State->Camera, Info->Blueprint.XForm.Pos);
@@ -548,38 +869,39 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         
         f32 UiRadius = CollisionBorderUiPoint.X - UiPoint.X;
         
-        rect Rect = MakeRectWithSize(UiPoint.X - UiRadius, UiPoint.Y - UiRadius, 2 * UiRadius, 2 * UiRadius);
-        
+        rect Rect = MakeRectWithSize(UiPoint.X - UiRadius, UiPoint.Y - UiRadius, 2 * UiRadius, 2 * UiRadius);        
+
         u64 Id = UI_ID(SpawnIndex);
         color Color;
-        if (UiControl->HotId == Id)
-        {
+        if (UiControl->HotId == Id) {
             Color = { 0.1f, 0.2f, 0.8f, 1.0f };
         }
-        else
-        {
+        else if(State->Editor.CurrentInfo == Info) {
+            Color = Orange_Color;
+        }
+        else {
             Color = { 0.6f, 0.23f, 0.6234f, 1.0f };
         }
-        
+
+        if (!HasSpawned)
+            Color.A = 0.3f;
+
         UiRect(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, Color, false);
         
-        if(State->DeleteButtonSelected) {
+        if(State->Editor.DeleteButtonSelected) {
             if (UiButton(UiControl, Id, Rect)) 
             {
                 State->Level.SpawnInfos[SpawnIndex] = State->Level.SpawnInfos[State->Level.SpawnInfos.Count - 1];
                 Pop(&State->Level.SpawnInfos);  
+
+                if (State->Editor.CurrentInfo == Info) 
+                    State->Editor.CurrentInfo = NULL;
             }
         }
         else {
-            vec2 DeltaPosition;
-            if (UiDragable(UiControl, Id, Rect, &DeltaPosition))
-            {
-                auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.5f);
-                UiWrite(&Cursor, "center: %f, %f", Info->Blueprint.XForm.Pos.X, Info->Blueprint.XForm.Pos.Y);
-                
-                UiPoint = UiPoint + DeltaPosition;
-                auto NewCenterCanvasPoint = UiToCanvasPoint(Ui, UiPoint);
-                Info->Blueprint.XForm.Pos = CanvasToWorldPoint(State->Camera, NewCenterCanvasPoint);
+            if (UiButton(UiControl, Id, Rect, 2)) {
+                State->Editor.CurrentInfo = Info;
+
             }
         }
         
@@ -589,12 +911,12 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     UiEnd();
 }
 
-void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaSeconds, entity *Player,  Mix_Music *bgm, textures Textures){
-    Player->XForm.Rotation += 2 * PI * DeltaSeconds;
+void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaSeconds){
+    State->Player->XForm.Rotation += 2 * PI * DeltaSeconds;
     
     if (WasPressed(GameInput.EnterKey)) {
-        initGame(State, &Player);
-        Mix_FadeInMusic(bgm, -1, 500);
+        initGame(State);
+        Mix_FadeInMusic(State->Assets.Bgm, -1, 500);
         State->Mode = Mode_Game;        
     }
     
@@ -613,10 +935,10 @@ void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaS
     Cursor.Color = White_Color;
     UiWrite(&Cursor, "to continue");
     
-    DrawAllEntities(State, Textures);                            
+    DrawAllEntities(State);                            
 }
 
-void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control UiControl, entity *Player, f32 DeltaSeconds, f32 *BulletSpawnCooldown, f32 *ChickenSpawnCooldown, Mix_Chunk *SfxBomb, f32 WorldWidth, textures Textures, histogram FrameRateHistogram){    
+void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control UiControl, f32 DeltaSeconds){    
     
     //State->Camera.WorldPosition.y += DeltaSeconds;
     
@@ -637,7 +959,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     
     for (u32 SpawnIndex = 0; SpawnIndex < State->Level.SpawnInfos.Count; SpawnIndex++) {
         auto Info = State->Level.SpawnInfos.Base + SpawnIndex;
-        if (Info->WasNotSpawned && (Info->SpawnTime <= State->Level.Time))
+        if (Info->WasNotSpawned && (Info->Blueprint.SpawnTime <= State->Level.Time))
         {
             auto Entity = NextEntity(Entities);
             
@@ -649,7 +971,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     }      
     
     //bullet movement        
-    if (*BulletSpawnCooldown > 0) *BulletSpawnCooldown -= DeltaSeconds;
+    if (State->BulletSpawnCooldown > 0) State->BulletSpawnCooldown -= DeltaSeconds;
     
     vec2 Direction = {};
     f32 Speed = 1.0f;
@@ -700,14 +1022,14 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
             case (FLAG(Entity_Type_Player) | FLAG(Entity_Type_Powerup)): {
                 auto Player = Current->Entities[0];
                 auto Powerup = Current->Entities[1];
-                assert((Player->Type == Entity_Type_Player) && (Powerup->Type == Entity_Type_Powerup));
+                assert((State->Player->Type == Entity_Type_Player) && (Powerup->Type == Entity_Type_Powerup));
                 
                 
-                auto Distance = Player->XForm.Pos - Powerup->XForm.Pos;
+                auto Distance = State->Player->XForm.Pos - Powerup->XForm.Pos;
                 
                 if (lengthSquared(Distance) <= Powerup_Collect_Radius * Powerup_Collect_Radius) {
                     Powerup->MarkedForDeletion = true;
-                    Player->player.Power++;
+                    State->Player->player.Power++;
                 }
                 else {
                     Powerup->XForm.Pos = Powerup->XForm.Pos + normalizeOrZero(Distance) * (Powerup_Magnet_Speed * DeltaSeconds);
@@ -754,12 +1076,12 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
                 auto Player = Current->Entities[0];
                 //auto Enemy = Current->Entities[1];
                 
-                assert(Player->Type == Entity_Type_Player);
+                assert(State->Player->Type == Entity_Type_Player);
                 
                 State->Mode = Mode_Game_Over;
                 Mix_FadeOutMusic(500);
                 Mix_HaltChannel(-1);
-                Mix_PlayChannel(0, loadChunk(Sfx_Death), 0);
+                Mix_PlayChannel(0, State->Assets.SfxDeath, 0);
                 return;
                 
             } break;  
@@ -786,7 +1108,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
             
             case Entity_Type_Bomb: {
                 E->CollisionRadius += DeltaSeconds * 3.0f;
-                E->XForm.Scale = E->CollisionRadius * 3.0f / (State->BombTexture.Height * Default_World_Units_Per_Texel);
+                E->XForm.Scale = E->CollisionRadius * 3.0f / (State->Assets.BombTexture.Height * Default_World_Units_Per_Texel);
                 
                 if (E->CollisionRadius > 6.0f) {
                     E->MarkedForDeletion = true;
@@ -811,17 +1133,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
                     }
                 } 
                 
-                f32 t = DeltaSeconds;
-                
-                while (E->fly.FlipCountdown < t) {
-                    E->XForm.Pos = E->XForm.Pos + E->fly.Velocity * E->fly.FlipCountdown;
-                    t -= E->fly.FlipCountdown;
-                    E->fly.Velocity = -(E->fly.Velocity);
-                    E->fly.FlipCountdown += E->fly.FlipInterval;
-                }
-                
-                E->fly.FlipCountdown -= DeltaSeconds;
-                E->XForm.Pos = E->XForm.Pos + E->fly.Velocity * t;
+                UpdateFlyPosition(E, State->Level.Time);                
                 
                 E->fly.FireCountdown -= DeltaSeconds;
                 if (E->fly.FireCountdown <= 0)
@@ -867,17 +1179,22 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
         else{ 
             i++;
         }
+    }
+
+    if (WasPressed(GameInput.EnterKey)) {
+        initGame(State);
+        return;
     }    
     
     //player movement
     if (GameInput.LeftKey.IsPressed) {
         Direction.X -= 1;
-        //player->XForm.Rotation -= 0.5f * PI * DeltaSeconds;
+        //State->Player->XForm.Rotation -= 0.5f * PI * DeltaSeconds;
     }
     
     if (GameInput.RightKey.IsPressed) {
         Direction.X += 1; 
-        //player->XForm.Rotation += 0.5f * PI * DeltaSeconds;
+        //State->Player->XForm.Rotation += 0.5f * PI * DeltaSeconds;
     }
     
     if (GameInput.UpKey.IsPressed) {
@@ -893,53 +1210,39 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     }
     
     Direction = normalizeOrZero(Direction);            
-    Player->XForm.Pos = Player->XForm.Pos + Direction * (Speed * DeltaSeconds);
+    State->Player->XForm.Pos = State->Player->XForm.Pos + Direction * (Speed * DeltaSeconds);
     
-    Player->XForm.Pos.Y = CLAMP(Player->XForm.Pos.Y , -1.0f + Player->CollisionRadius + State->Camera.WorldPosition.Y, 1.0f - Player->CollisionRadius + State->Camera.WorldPosition.Y);
+    State->Player->XForm.Pos.Y = CLAMP(State->Player->XForm.Pos.Y , -1.0f + State->Player->CollisionRadius + State->Camera.WorldPosition.Y, 1.0f - State->Player->CollisionRadius + State->Camera.WorldPosition.Y);
     
     // WorldWidth = windowWidth / windowHeight * worldHeight 
     // worldHeight = 2 (from -1 to 1)               
-    Player->XForm.Pos.X = CLAMP(Player->XForm.Pos.X, -WorldWidth * 0.5f + Player->CollisionRadius, WorldWidth * 0.5f - Player->CollisionRadius);
+    State->Player->XForm.Pos.X = CLAMP(State->Player->XForm.Pos.X, -State->WorldWidth * 0.5f + State->Player->CollisionRadius, State->WorldWidth * 0.5f - State->Player->CollisionRadius);
     {
 #if 0
-        f32 Rotation = asin((enemies[0].XForm.Pos.x - player->XForm.Pos.x) / length(enemies[0].XForm.Pos - player->XForm.Pos));
-        if (enemies[0].XForm.Pos.y < player->XForm.Pos.y) {
+        f32 Rotation = asin((enemies[0].XForm.Pos.x - State->Player->XForm.Pos.x) / length(enemies[0].XForm.Pos - State->Player->XForm.Pos));
+        if (enemies[0].XForm.Pos.y < State->Player->XForm.Pos.y) {
             Rotation = Rotation - PI;
         }
         else {
             Rotation = 2 * PI - Rotation;
         }
         
-        player->XForm.Rotation = Rotation;
+        State->Player->XForm.Rotation = Rotation;
         
 #else
         if (Boss)
-            Player->XForm.Rotation = LookAtRotation(Player->XForm.Pos, Boss->XForm.Pos);
+            State->Player->XForm.Rotation = LookAtRotation(State->Player->XForm.Pos, Boss->XForm.Pos);
         
         
 #endif
     }
-    {
-        *ChickenSpawnCooldown -= DeltaSeconds;
-        
-        if(0){
-            //if(*ChickenSpawnCooldown <= 0) {
-            //unleash the chicken!
-            entity *Chicken = NextEntity(Entities);
-            
-            if (Chicken != NULL) {               
-                *Chicken = MakeChicken(State->Camera.WorldPosition);
-            }        
-            *ChickenSpawnCooldown += 1.0f;
-        }
-    }
-    
+                
     if(GameInput.FireKey.IsPressed) {
-        if ((*BulletSpawnCooldown <= 0)) {
+        if ((State->BulletSpawnCooldown <= 0)) {
             entity *Bullet = NextEntity(Entities);
             
             if (Bullet != NULL) {
-                Bullet->XForm.Pos = Player->XForm.Pos;
+                Bullet->XForm.Pos = State->Player->XForm.Pos;
                 Bullet->XForm.Scale = 0.2f;
                 Bullet->XForm.Rotation = 0;
                 Bullet->CollisionRadius = Bullet->XForm.Scale * 0.2;
@@ -947,10 +1250,10 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
                 Bullet->CollisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly);
                 Bullet->RelativeDrawCenter = vec2 {0.5f, 0.5f};
                 
-                Bullet->bullet.Damage = (Player->player.Power / 20) + 1;
+                Bullet->bullet.Damage = (State->Player->player.Power / 20) + 1;
                 Bullet->bullet.Damage = MIN(Bullet->bullet.Damage, 3);
                 
-                *BulletSpawnCooldown += 0.05f;
+                State->BulletSpawnCooldown += 0.05f;
                 
                 //                        Mix_PlayChannel(0, sfxShoot, 0);
             }
@@ -958,22 +1261,22 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     }
     
     if(WasPressed(GameInput.BombKey)) {                       
-        if (Player->player.Bombs > 0) {
+        if (State->Player->player.Bombs > 0) {
             
             entity *Bomb = NextEntity(Entities);
             
             if (Bomb != NULL) {
-                Bomb->XForm.Pos = Player->XForm.Pos;
+                Bomb->XForm.Pos = State->Player->XForm.Pos;
                 Bomb->CollisionRadius = 0.1f;
-                Bomb->XForm.Scale = Bomb->CollisionRadius * 3.0f / (State->BombTexture.Height * Default_World_Units_Per_Texel);
+                Bomb->XForm.Scale = Bomb->CollisionRadius * 3.0f / (State->Assets.BombTexture.Height * Default_World_Units_Per_Texel);
                 Bomb->XForm.Rotation = 0;
                 Bomb->Type = Entity_Type_Bomb;
                 Bomb->CollisionTypeMask = FLAG(Entity_Type_Boss) | FLAG(Entity_Type_Fly) | FLAG(Entity_Type_Bullet);
                 Bomb->RelativeDrawCenter = vec2 {0.5f, 0.5f};
                 
-                Player->player.Bombs--;
+                State->Player->player.Bombs--;
                 
-                Mix_PlayChannel(0, SfxBomb, 0);
+                Mix_PlayChannel(0, State->Assets.SfxBomb, 0);
             }
         }
     }
@@ -995,34 +1298,18 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     drawTexturedQuad(State.Camera, backgroundXForm, levelLayer2, White_Color, vec2 {0.5f,  currentLevelYPosition / State.Level.WorldHeight}, State.Level.LayersWorldUnitsPerPixels[1], 0.8f);
 #endif
     
-    DrawAllEntities(State, Textures);
+    DrawAllEntities(State);
     
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
-    
-    //debug framerate, hitbox and player/boss normalized x, y coordinates
-    
-#define DEBUG_UI
-#ifdef DEBUG_UI
-    DrawHistogram(FrameRateHistogram);
-    
-    for (u32 i = 0; i < Entities->Count; i++) {
-        transform collisionTransform = (*Entities)[i].XForm;
-        collisionTransform.Scale = 2 * Entities->Base[i].CollisionRadius;
-        DrawCircle(State->Camera, collisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
-        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
-        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
-    }        
-    
-#endif //DEBUG_UI
     
     //GUI
     {
         UiBegin();
         
         //bomb count           
-        for (int Bomb = 0; Bomb < Player->player.Bombs; Bomb++){
-            UiTexturedRect(Ui, Textures.BombCountTexture, 20 + Bomb * (Textures.BombCountTexture.Width + 5), Ui->Height - 250, Textures.BombCountTexture.Width, Textures.BombCountTexture.Height, 0, 0, Textures.BombCountTexture.Width, Textures.BombCountTexture.Height, White_Color);
+        for (int Bomb = 0; Bomb < State->Player->player.Bombs; Bomb++){
+            UiTexturedRect(Ui, State->Assets.BombCountTexture, 20 + Bomb * (State->Assets.BombCountTexture.Width + 5), Ui->Height - 250, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, 0, 0, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, White_Color);
         }
         
         //boss Hp
@@ -1035,7 +1322,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
         }
         
         //player Power
-        UiBar(Ui, 20, Ui->Height - 200, 120,40, (Player->player.Power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
+        UiBar(Ui, 20, Ui->Height - 200, 120,40, (State->Player->player.Power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
         
         UiEnd();
     }
@@ -1157,34 +1444,7 @@ int main(int argc, char* argv[]) {
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generatet in function call scope
         glDebugMessageCallback(wostenGLDebugCallback, NULL);
     }    
-    //sound init
-    int MixInit = Mix_Init(MIX_INIT_MP3);
-    if(MixInit&MIX_INIT_MP3 != MIX_INIT_MP3) {
-        printf("Error initializing mix: %s \n", Mix_GetError());
-    }
-    
-    if (Mix_OpenAudio(MIX_DEFAULT_FREQUENCY, MIX_DEFAULT_FORMAT, 2, 4096)) {
-        printf("Error Mix_OpenAudio: %s \n", Mix_GetError());
-    }
-    Mix_Music *Bgm = Mix_LoadMUS("data/Gravity Sound/Gravity Sound - Rain Delay CC BY 4.0.mp3");
-    if(!Bgm) {
-        printf("Error loading music file: %s \n", Mix_GetError());
-    } 
-    else {    
-        Mix_PlayMusic(Bgm, -1);
-        Mix_VolumeMusic(Config.BgmVolume);
-    }
-    
-    //sfx
-    Mix_AllocateChannels(1);
-    Mix_Volume(0, Config.SfxVolume);
-    Mix_Chunk *SfxBomb = loadChunk(Sfx_Bomb);
-    //Mix_Chunk *sfxShoot = loadChunk(Sfx_Shoot); 
-    
-    if(!SfxBomb) {
-        printf("Error loading music file: %s \n", Mix_GetError());
-    }
-    
+   
     histogram FrameRateHistogram = {};
     
     ui_context Ui = {};
@@ -1196,129 +1456,141 @@ int main(int argc, char* argv[]) {
     u64 LastTime = SDL_GetPerformanceCounter();
     f32 ScaleAlpha = 0;
     
-    textures Textures = {};
-    Textures.LevelLayer1 = LoadTexture("data/level_1.png");
-    Textures.LevelLayer2 = LoadTexture("data/level_1_layer_2.png");
-    Textures.PlayerTexture = LoadTexture("data/Kenney/Animals/giraffe.png");
-    Textures.BossTexture = LoadTexture("data/Kenney/Animals/parrot.png");
-    Textures.FlyTexture = LoadTexture("data/Kenney/Animals/chicken.png");
-    Textures.BulletTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_014.png");  
-    Textures.BulletPoweredUpTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
-    Textures.BulletMaxPoweredUpTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
-    Textures.BombCountTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_021.png");
-    Textures.PowerupTexture = LoadTexture("data/Kenney/Letter Tiles/letter_P.png");
-    
-    // UI
-    Textures.IdleButtonTexture = LoadTexture("data/Kenney/PNG/blue_button02.png");
-    Textures.HotButtonTexture = LoadTexture("data/Kenney/PNG/blue_button03.png");
-    Textures.DeleteButtonTexture = LoadTexture("data/Kenney/PNG/grey_boxCross.png");
-    
-    SDL_RWops* Op = SDL_RWFromFile("C:/Windows/Fonts/Arial.ttf", "rb");
-    s64 ByteCount = Op->size(Op);
-    u8 *Data = new u8[ByteCount];   
-    usize Ok = SDL_RWread(Op, Data, ByteCount, 1);
-    assert (Ok == 1);
-    
-    stbtt_fontinfo StbFont;
-    stbtt_InitFont(&StbFont, Data, stbtt_GetFontOffsetForIndex(Data,0));
-    
-    f32 Scale = stbtt_ScaleForPixelHeight(&StbFont, 48);
-    s32 Ascent;
-    stbtt_GetFontVMetrics(&StbFont, &Ascent,0,0);
-    s32 Baseline = (s32) (Ascent*Scale);
-    
-    const s32 BitmapWidth = 512;
-    u8 Bitmap[BitmapWidth * BitmapWidth] = {};
-    s32 XOffset = 0;
-    s32 YOffset = 0;
-    s32 MaxHight = 0;
-    font DefaultFont = {};
-    
-    //    while (text[ch]) 
-    
-    for (u32 i = ' '; i < 256; i++) {   
-        glyph *FontGlyph = DefaultFont.Glyphs + i;
-        FontGlyph->Code = i;
-        
-        s32 UnscaledXAdvance;  
-        stbtt_GetCodepointHMetrics(&StbFont, FontGlyph->Code, &UnscaledXAdvance, &FontGlyph->DrawXOffset);
-        FontGlyph->DrawXAdvance = UnscaledXAdvance * Scale;
-        
-        s32 X0, X1, Y0, Y1;
-        stbtt_GetCodepointBitmapBox(&StbFont, FontGlyph->Code, Scale, Scale, &X0, &Y0, &X1, &Y1);
-        FontGlyph->Width = X1 - X0;
-        FontGlyph->Height = Y1 - Y0;
-        FontGlyph->DrawXOffset = X0;
-        // y0 is top corner, but its also negative ...
-        // we draw from bottom left corner
-        FontGlyph->DrawYOffset = -(Y0 + FontGlyph->Height);
-        DefaultFont.BaselineTopOffset    = MIN(DefaultFont.BaselineTopOffset, FontGlyph->Height + FontGlyph->DrawYOffset);
-        DefaultFont.BaselineBottomOffset = MAX(DefaultFont.BaselineBottomOffset, -FontGlyph->DrawYOffset);
-        
-        if ((XOffset + FontGlyph->Width) >= BitmapWidth) {
-            XOffset = 0;
-            YOffset += MaxHight + 1;
-            MaxHight = 0;
-        }
-        assert(FontGlyph->Width <= BitmapWidth);
-        
-        stbtt_MakeCodepointBitmap(&StbFont, Bitmap + XOffset + YOffset * BitmapWidth, FontGlyph->Width, FontGlyph->Height, BitmapWidth, Scale, Scale, FontGlyph->Code);
-        FontGlyph->X = XOffset;
-        // we flip the texture so we need to change the y to the inverse
-        FontGlyph->Y = BitmapWidth - YOffset - FontGlyph->Height;
-        XOffset += FontGlyph->Width + 1;
-        MaxHight = MAX(MaxHight, FontGlyph->Height);
-        DefaultFont.MaxGlyphWidth = MAX(DefaultFont.MaxGlyphWidth, FontGlyph->Width);
-        DefaultFont.MaxGlyphHeight = MAX(DefaultFont.MaxGlyphHeight, FontGlyph->Height);
-    }
-    
-    DefaultFont.Texture = LoadTexture(Bitmap, BitmapWidth, BitmapWidth, 1, GL_NEAREST);    
-    
-    Ui.CurrentFont = &DefaultFont;
-    
-    f32 WorldHeightOverWidth = 3.0f / 4.0f; 
-    f32 WorldWidth = WorldCameraHeight / WorldHeightOverWidth;
-    
     entity _entitieEntries[100];
     game_state State = {};
-    State.Mode = Mode_Game;
+    State.WorldWidth = WorldCameraHeight / WorldHeightOverWidth;
+    State.Mode = Mode_Title;
     State.Level.Duration = 30.0f;
     State.Level.Time = 0.0f;
-    State.Level.LayersWorldUnitsPerPixels[0] = WorldWidth / Textures.LevelLayer1.Width;
-    State.Level.LayersWorldUnitsPerPixels[1] = WorldWidth / Textures.LevelLayer2.Width;
-    State.Level.WorldHeight = State.Level.LayersWorldUnitsPerPixels[0] * Textures.LevelLayer1.Height;  
+    State.Level.LayersWorldUnitsPerPixels[0] = State.WorldWidth / State.Assets.LevelLayer1.Width;
+    State.Level.LayersWorldUnitsPerPixels[1] = State.WorldWidth / State.Assets.LevelLayer2.Width;
+    State.Level.WorldHeight = State.Level.LayersWorldUnitsPerPixels[0] * State.Assets.LevelLayer1.Height;  
     State.Entities = { ARRAY_WITH_COUNT(_entitieEntries) };
-    State.BombTexture = LoadTexture("data/Kenney/particlePackCircle.png");
-    State.DeleteButtonSelected = false;
-    entity *Player;
+    State.Editor.DeleteButtonSelected = false;
+
+    State.Assets.LevelLayer1 = LoadTexture("data/level_1.png");
+    State.Assets.LevelLayer2 = LoadTexture("data/level_1_layer_2.png");
+    State.Assets.PlayerTexture = LoadTexture("data/Kenney/Animals/giraffe.png");
+    State.Assets.BossTexture = LoadTexture("data/Kenney/Animals/parrot.png");
+    State.Assets.FlyTexture = LoadTexture("data/Kenney/Animals/chicken.png");
+    State.Assets.BulletTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_014.png");  
+    State.Assets.BulletPoweredUpTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_001.png");
+    State.Assets.BulletMaxPoweredUpTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_006.png");
+    State.Assets.BombTexture = LoadTexture("data/Kenney/particlePackCircle.png");
+    State.Assets.PowerupTexture = LoadTexture("data/Kenney/Letter Tiles/letter_P.png");
     
-    /*
-    auto bossSpawnInfo  = Push(&State.Level.SpawnInfos);
-    assert(bossSpawnInfo);
-    bossSpawnInfo->WasNotSpawned = true;
+    // UI
+    State.Assets.BombCountTexture = LoadTexture("data/Kenney/Missiles/spaceMissiles_021.png");
+    State.Assets.IdleButtonTexture = LoadTexture("data/Kenney/PNG/blue_button02.png");
+    State.Assets.HotButtonTexture = LoadTexture("data/Kenney/PNG/blue_button03.png");
+    State.Assets.DeleteButtonTexture = LoadTexture("data/Kenney/PNG/grey_boxCross.png");
+    State.Assets.AddPathButton = LoadTexture("data/Kenney/PNG/blue_boxTick.png");
+
+    { 
+        SDL_RWops* Op = SDL_RWFromFile("C:/Windows/Fonts/Arial.ttf", "rb");
+        s64 ByteCount = Op->size(Op);
+        u8 *Data = new u8[ByteCount];   
+        usize Ok = SDL_RWread(Op, Data, ByteCount, 1);
+        assert (Ok == 1);
+        
+        stbtt_fontinfo StbFont;
+        stbtt_InitFont(&StbFont, Data, stbtt_GetFontOffsetForIndex(Data,0));
+        
+        f32 Scale = stbtt_ScaleForPixelHeight(&StbFont, 48);
+        s32 Ascent;
+        stbtt_GetFontVMetrics(&StbFont, &Ascent,0,0);
+        s32 Baseline = (s32) (Ascent*Scale);
+        
+        const s32 BitmapWidth = 512;
+        u8 Bitmap[BitmapWidth * BitmapWidth] = {};
+        s32 XOffset = 0;
+        s32 YOffset = 0;
+        s32 MaxHight = 0;
+            
+        //    while (text[ch]) 
+        
+        for (u32 i = ' '; i < 256; i++) {   
+            glyph *FontGlyph = State.Assets.DefaultFont.Glyphs + i;
+            FontGlyph->Code = i;
+            
+            s32 UnscaledXAdvance;  
+            stbtt_GetCodepointHMetrics(&StbFont, FontGlyph->Code, &UnscaledXAdvance, &FontGlyph->DrawXOffset);
+            FontGlyph->DrawXAdvance = UnscaledXAdvance * Scale;
+            
+            s32 X0, X1, Y0, Y1;
+            stbtt_GetCodepointBitmapBox(&StbFont, FontGlyph->Code, Scale, Scale, &X0, &Y0, &X1, &Y1);
+            FontGlyph->Width = X1 - X0;
+            FontGlyph->Height = Y1 - Y0;
+            FontGlyph->DrawXOffset = X0;
+            // y0 is top corner, but its also negative ...
+            // we draw from bottom left corner
+            FontGlyph->DrawYOffset = -(Y0 + FontGlyph->Height);
+            State.Assets.DefaultFont.BaselineTopOffset    = MIN(State.Assets.DefaultFont.BaselineTopOffset, FontGlyph->Height + FontGlyph->DrawYOffset);
+            State.Assets.DefaultFont.BaselineBottomOffset = MAX(State.Assets.DefaultFont.BaselineBottomOffset, -FontGlyph->DrawYOffset);
+            
+            if ((XOffset + FontGlyph->Width) >= BitmapWidth) {
+                XOffset = 0;
+                YOffset += MaxHight + 1;
+                MaxHight = 0;
+            }
+            assert(FontGlyph->Width <= BitmapWidth);
+            
+            stbtt_MakeCodepointBitmap(&StbFont, Bitmap + XOffset + YOffset * BitmapWidth, FontGlyph->Width, FontGlyph->Height, BitmapWidth, Scale, Scale, FontGlyph->Code);
+            FontGlyph->X = XOffset;
+            // we flip the texture so we need to change the y to the inverse
+            FontGlyph->Y = BitmapWidth - YOffset - FontGlyph->Height;
+            XOffset += FontGlyph->Width + 1;
+            MaxHight = MAX(MaxHight, FontGlyph->Height);
+            State.Assets.DefaultFont.MaxGlyphWidth = MAX(State.Assets.DefaultFont.MaxGlyphWidth, FontGlyph->Width);
+            State.Assets.DefaultFont.MaxGlyphHeight = MAX(State.Assets.DefaultFont.MaxGlyphHeight, FontGlyph->Height);
+        }
+        
+        State.Assets.DefaultFont.Texture = LoadTexture(Bitmap, BitmapWidth, BitmapWidth, 1, GL_NEAREST);    
+        delete[] Data;
+    }
+
+    Ui.CurrentFont = &State.Assets.DefaultFont;
+
+    //sound init
+    int MixInit = Mix_Init(MIX_INIT_MP3);
+    if(MixInit&MIX_INIT_MP3 != MIX_INIT_MP3) {
+        printf("Error initializing mix: %s \n", Mix_GetError());
+    }
     
-    bossSpawnInfo->Blueprint.XForm.Pos = vec2{0.0f, 0.5f};  
-    bossSpawnInfo->Blueprint.XForm.Rotation = 0.0f;
-    bossSpawnInfo->Blueprint.CollisionRadius = 0.35f;
-    bossSpawnInfo->Blueprint.XForm.Scale = bossSpawnInfo->Blueprint.CollisionRadius * 2.0f / (bossTexture.Height * Default_World_Units_Per_Texel);
-    bossSpawnInfo->Blueprint.RelativeDrawCenter = vec2{0.5f, 0.5f};
-    bossSpawnInfo->Blueprint.MaxHp = 500;
-    bossSpawnInfo->Blueprint.Hp = bossSpawnInfo->Blueprint.MaxHp;
-    bossSpawnInfo->Blueprint.Type = Entity_Type_Boss;
-    bossSpawnInfo->Blueprint.CollisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-    bossSpawnInfo->Blueprint.blinkDuration = 0.1f;
-    bossSpawnInfo->Blueprint.BlinkTime = 0.0f;
-    */
+    if (Mix_OpenAudio(MIX_DEFAULT_FREQUENCY, MIX_DEFAULT_FORMAT, 2, 4096)) {
+        printf("Error Mix_OpenAudio: %s \n", Mix_GetError());
+    }
+    State.Assets.Bgm = Mix_LoadMUS("data/Gravity Sound/Gravity Sound - Rain Delay CC BY 4.0.mp3");
+    if(!State.Assets.Bgm) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    } 
+    else {    
+        Mix_PlayMusic(State.Assets.Bgm, -1);
+        Mix_VolumeMusic(Config.BgmVolume);
+    }
     
+    //sfx
+    Mix_AllocateChannels(1);
+    Mix_Volume(0, Config.SfxVolume);
+
+    State.Assets.SfxDeath =Mix_LoadWAV("data/Gravity Sound/Low Health.wav");
+    if(!State.Assets.SfxDeath) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    }
+
+    State.Assets.SfxBomb = Mix_LoadWAV("data/Gravity Sound/Level Up 4.wav");    
+    if(!State.Assets.SfxBomb) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    }
+
+    State.Assets.SfxShoot = Mix_LoadWAV("data/Gravity Sound/Dropping Item 6.wav");    
+    if(!State.Assets.SfxShoot) {
+        printf("Error loading music file: %s \n", Mix_GetError());
+    }
+      
     State.Level = LoadLevel("data/levels/Level.bin");
     SaveLevel("data/levels/LevelBackup.bin", State.Level);
-    initGame(&State, &Player);
-    
-    //timer init
-    
-    f32 BulletSpawnCooldown = 0;
-	
-    f32 ChickenSpawnCooldown = 5.0f;
+    initGame(&State);
     
     input GameInput = {};
     
@@ -1485,7 +1757,11 @@ int main(int argc, char* argv[]) {
         //game update
         switch (State.Mode) {
             case Mode_Title: {
-                UpdateTitle(&State, &Ui, &UiControl, DeltaSeconds, GameInput,  Textures, &DoContinue);   
+                UpdateTitle(&State, &Ui, &UiControl, DeltaSeconds, GameInput, &DoContinue);   
+            } break;
+
+            case Mode_Settings: {
+                UpdateSettings(&State, &Ui, &UiControl, DeltaSeconds, GameInput, Window);
             } break;
             
             case Mode_Game: {
@@ -1493,11 +1769,11 @@ int main(int argc, char* argv[]) {
                     State.Mode = Mode_Editor;
                     break;
                 };
-                UpdateGame(&State, GameInput, &Ui, UiControl, Player, DeltaSeconds, &BulletSpawnCooldown, &ChickenSpawnCooldown, SfxBomb, WorldWidth, Textures, FrameRateHistogram);
+                UpdateGame(&State, GameInput, &Ui, UiControl, DeltaSeconds);
             } break;
             
             case Mode_Game_Over: {
-                UpdateGameOver(&State, GameInput, Ui, DeltaSeconds, Player, Bgm, Textures);
+                UpdateGameOver(&State, GameInput, Ui, DeltaSeconds);
             } break;
             
             case Mode_Editor: { 
@@ -1505,7 +1781,7 @@ int main(int argc, char* argv[]) {
                     State.Mode = Mode_Game;
                     break;
                 };
-                UpdateEditor(&State, &Ui, &UiControl, DeltaSeconds, GameInput, Textures);
+                UpdateEditor(&State, &Ui, &UiControl, DeltaSeconds, GameInput);
             } break;
             
             default: {
@@ -1513,9 +1789,15 @@ int main(int argc, char* argv[]) {
             } break;
         }            
         
+    //debug framerate, hitbox and player/boss normalized x, y coordinates
+    #ifdef DEBUG_UI
+        DrawHistogram(FrameRateHistogram);    
+
+    #endif //DEBUG_UI
+    
         UiBegin();
         {
-            auto Cursor = UiBeginText(&Ui, &DefaultFont, 10, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
+            auto Cursor = UiBeginText(&Ui, &State.Assets.DefaultFont, 10, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
             UiWrite(&Cursor, "mouse Pos: %f, %f [%i, %i]\n", UiControl.Cursor.X, UiControl.Cursor.Y, GameInput.LeftMouseKey.IsPressed, GameInput.LeftMouseKey.HasChanged);            
             UiWrite(&Cursor, "UiControl: [active: %llu, hot: %llu]\n", UiControl.ActiveId, UiControl.HotId);
             UiWrite(&Cursor, "Entities: [%llu / %llu] \n", State.Entities.Count, State.Entities.Capacity);

@@ -25,6 +25,7 @@ const color Black_Color = {0.0f, 0.0f, 0.0f, 1.0f};
 const color Red_Color = {1.0f, 0.0f, 0.0f, 1.0f};
 const color Green_Color = {0.0f, 1.0f, 0.0f, 1.0f};
 const color Blue_Color = {0.0f, 0.0f, 1.0f, 1.0f};
+const color Orange_Color ={1.0f, 0.5f, 0.0f, 1.0f};
 
 color lerp(color A, color B, f32 T) {
 	color Result;
@@ -64,25 +65,6 @@ vec2 CanvasToWorldPoint(camera Camera, vec2 CanvasPoint){
 struct texture {
     s32 Width, Height;
     GLuint Object;
-};
-
-struct textures {
-    //doesn't include bomb texture or font
-    texture LevelLayer1;
-    texture LevelLayer2;
-    texture PlayerTexture;
-    texture BossTexture;
-    texture FlyTexture;
-    texture BulletTexture;
-    texture BulletPoweredUpTexture;
-    texture BulletMaxPoweredUpTexture;
-    texture BombCountTexture;
-    texture PowerupTexture;
-    
-    // UI
-    texture IdleButtonTexture;
-    texture HotButtonTexture;
-    texture DeleteButtonTexture;
 };
 
 struct glyph {
