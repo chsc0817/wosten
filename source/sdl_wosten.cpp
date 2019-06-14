@@ -45,6 +45,13 @@ enum entity_type {
     Entity_Type_Count
 };
 
+enum path_type {
+    Path_Type_Stop,       
+    Path_Type_Loop,       
+    Path_Type_Reverse,    
+    Path_Type_Follow      
+};
+
 enum sfx {
     Sfx_Death,
     Sfx_Bomb,
@@ -101,11 +108,18 @@ struct path_point{
     f32 Time;
 };
 
-#define template_array_name      path
+#define template_array_name      path_template
 #define template_array_data_type path_point
 #define template_array_is_buffer 
 #define template_array_static_count 10
 #include "template_array.h"
+
+struct path {
+    path_template Points;
+    path_type Type;
+    f32 TransitionTime; //time it takes to go back to the first point if Path_Type_Loop is chosen or the delay to the leading entity if it is Path_Type_Follow
+    s32 Digit; 
+};
 
 struct entity {
     transform XForm;
@@ -187,7 +201,11 @@ struct assets {
     texture IdleButtonTexture;
     texture HotButtonTexture;
     texture DeleteButtonTexture;
-    texture AddPathButton;
+    texture AddPathButtonTexture;
+    texture PathStopButtonTexture;
+    texture PathLoopButtonTexture;
+    texture PathReverseButtonTexture;
+    texture PathFollowButtonTexture;
 
     font DefaultFont;
 
@@ -621,25 +639,35 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
 void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
     assert(Entity->Type == Entity_Type_Fly);
     
-    u32 MinPathIndex = Entity->fly.Path.Count;
+    u32 MinPathIndex = Entity->fly.Path.Points.Count;
     f32 Time = LevelTime - Entity->SpawnTime;
 
-    for (u32 i = Entity->fly.Path.Count; i > 0; i--) {
-        if (Time >= Entity->fly.Path[i - 1].Time) {
+    for (u32 i = Entity->fly.Path.Points.Count; i > 0; i--) {
+        if (Time >= Entity->fly.Path.Points[i - 1].Time) {
             MinPathIndex = i - 1;
             break;
         }
     }
 
-    if (MinPathIndex == Entity->fly.Path.Count) {
-        Entity->XForm.Pos = Entity->fly.Path[0].Position;
+    if (MinPathIndex == Entity->fly.Path.Points.Count) {
+        Entity->XForm.Pos = Entity->fly.Path.Points[0].Position;
     }
-    else if (MinPathIndex == (Entity->fly.Path.Count - 1)) {
-        Entity->XForm.Pos = Entity->fly.Path[MinPathIndex].Position;
+    else if (MinPathIndex == (Entity->fly.Path.Points.Count - 1)) {
+
+        switch (Entity->fly.Path.Type) {
+            case Path_Type_Stop: {
+                 Entity->XForm.Pos = Entity->fly.Path.Points[MinPathIndex].Position;
+            } break;
+
+            case Path_Type_Loop: {
+                
+            }
+        }
+       
     }
     else { 
-        path_point *CurrentPath = &Entity->fly.Path[MinPathIndex];
-        path_point *NextPath = &Entity->fly.Path[MinPathIndex + 1];
+        path_point *CurrentPath = &Entity->fly.Path.Points[MinPathIndex];
+        path_point *NextPath = &Entity->fly.Path.Points[MinPathIndex + 1];
         f32 l = (Time - CurrentPath->Time) / (NextPath->Time - CurrentPath->Time);
 
         assert(Time < NextPath->Time);
@@ -652,7 +680,7 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
 }
 
 //assuming path are already in order except last point
-void SortPath(path *Path) {
+u32 SortPath(path_template *Path) {
     assert(Path->Count > 0);
 
     path_point Insert = (*Path)[Path->Count - 1];
@@ -668,28 +696,30 @@ void SortPath(path *Path) {
     //remove points that are too close in time
     if (InsertIndex == Path->Count - 1){
         if ((Path->Count >= 2) && (ABS((*Path)[Path->Count - 2].Time - Insert.Time) < 0.1f)) {
-            (*Path)[Path->Count - 2] = Insert;
+           (*Path)[Path->Count - 2] = Insert;
             Pop(Path);    
-            return;
+            return (Path->Count - 2);
         }    
     } 
     else if  (ABS((*Path)[InsertIndex].Time - Insert.Time) < 0.1f) {
         (*Path)[InsertIndex] = Insert;
         Pop(Path);    
-        return;
+        return InsertIndex;
     } 
 
     for (u32 i = Path->Count - 1; i > InsertIndex; i--) {
-        (*Path)[i] = (*Path)[ i - 1];
+       (*Path)[i] =(*Path)[ i - 1];
     }
     (*Path)[InsertIndex] = Insert;
+
+    return InsertIndex;
 }
 
-void RemovePathPoint(path *Path, u32 RemoveIndex ) {
+void RemovePathPoint(path_template *Path, u32 RemoveIndex ) {
     assert(RemoveIndex < Path->Count);
 
     for (u32 i = RemoveIndex; i < Path->Count - 1; i++) {
-        (*Path)[i] = (*Path)[i + 1];
+       (*Path)[i] =(*Path)[i + 1];
     }
     Pop(Path);
 }
@@ -708,7 +738,22 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         State->Camera.WorldPosition.y = MAX(State->Camera.WorldPosition.y, WorldCameraHeight * 0.5f);
     }
 #endif
-    
+    if (State->Editor.CurrentInfo != NULL) {
+
+        auto Time = &State->Editor.CurrentInfo->Blueprint.fly.Path.TransitionTime;
+        if (WasPressed(GameInput.FireKey)) {
+            *Time += 1.0f;
+        }
+
+        if (WasPressed(GameInput.BombKey)) {
+            *Time -= 1.0f;
+        } 
+          
+        auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.5f);
+        UiWrite(&Cursor, "Transition: %f", State->Editor.CurrentInfo->Blueprint.fly.Path.TransitionTime);
+        
+    }
+
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
     
@@ -723,36 +768,104 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
             Info->WasNotSpawned = true;
             Info->Blueprint = MakeChicken(State->Camera.WorldPosition);
             Info->Blueprint.SpawnTime = State->Level.Time;
-            path_point *Path = Push(&Info->Blueprint.fly.Path);
+            path_point *Path = Push(&Info->Blueprint.fly.Path.Points);
             Path->Position = Info->Blueprint.XForm.Pos;
             Path->Time = 0;
-            State->Editor.CurrentInfo = Info;
+            Info->Blueprint.fly.Path.Type = Path_Type_Stop;
+            Info->Blueprint.fly.Path.TransitionTime = 0.0f;
+            Info->Blueprint.fly.Path.Digit = 0;
+            State->Editor.CurrentInfo = Info; 
         }
     }
 
     rect AddPathRect =  MakeRectWithSize(20, 160, 60, 60);
+    rect PathTypeRect =  MakeRectWithSize(AddPathRect.Left + 100, AddPathRect.Bottom, 64, 64);
     if (State->Editor.CurrentInfo != NULL) {
         if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
             
-            UiTexturedRect(Ui, State->Assets.AddPathButton, AddPathRect, MakeRectWithSize(0, 0, State->Assets.AddPathButton.Width, State->Assets.AddPathButton.Height));
+            UiTexturedRect(Ui, State->Assets.AddPathButtonTexture, AddPathRect, MakeRectWithSize(0, 0, State->Assets.AddPathButtonTexture.Width, State->Assets.AddPathButtonTexture.Height));
             auto Info = State->Editor.CurrentInfo;
             
             if (UiButton(UiControl, UI_ID0, AddPathRect)) {
-                path_point *PathPoint = Push(&Info->Blueprint.fly.Path);   
+                path_point *PathPoint = Push(&Info->Blueprint.fly.Path.Points);   
                 PathPoint->Position = Info->Blueprint.XForm.Pos;
-                PathPoint->Time = State->Level.Time - Info->Blueprint.SpawnTime;
-                SortPath(&Info->Blueprint.fly.Path);
-            }  
+                PathPoint->Time = State->Level.Time - Info->Blueprint.SpawnTime;                
+                
+                if (SortPath(&Info->Blueprint.fly.Path.Points) == 0){
+                    if (Info->Blueprint.fly.Path.Points.Count > 1) {
 
-            for (s32 i = 0; i < Info->Blueprint.fly.Path.Count; ++i) {
-              UiEnd();
-                if(i < Info->Blueprint.fly.Path.Count - 1){
-                    DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path[i].Position, Info->Blueprint.fly.Path[i + 1].Position, Blue_Color); 
+                        f32 AdjustTime = Info->Blueprint.SpawnTime - State->Level.Time;
+                        
+                        for (u32 i = 1; i < Info->Blueprint.fly.Path.Points.Count; i++) {
+                             Info->Blueprint.fly.Path.Points[i].Time +=  AdjustTime;
+                        }   
+                    }   
+
+                    Info->Blueprint.fly.Path.Points[0].Time = 0;
+                    Info->Blueprint.SpawnTime = State->Level.Time;              
                 }
 
-                DrawCircle(State->Camera, transform {Info->Blueprint.fly.Path[i].Position, 0.0f, 0.1f}, Blue_Color, false);
+            }  
+
+            texture PathTypeTexture;
+
+            switch(Info->Blueprint.fly.Path.Type) {
+                case Path_Type_Stop: {
+                    PathTypeTexture = State->Assets.PathStopButtonTexture;
+                } break;
+
+                case Path_Type_Loop: {
+                    PathTypeTexture = State->Assets.PathLoopButtonTexture;
+                } break;
+
+                case Path_Type_Reverse: {
+                    PathTypeTexture = State->Assets.PathReverseButtonTexture;
+                } break;
+
+                case Path_Type_Follow: {
+                    PathTypeTexture = State->Assets.PathFollowButtonTexture;
+                } break;
+
+                default: {
+                    PathTypeTexture.Object = 0;
+                    assert(PathTypeTexture.Object);
+                }
+            }
+
+            UiTexturedRect(Ui, PathTypeTexture, PathTypeRect, MakeRectWithSize(0, 0, PathTypeTexture.Width, PathTypeTexture.Height));
+
+            if (UiButton(UiControl, UI_ID0, PathTypeRect)) {
+                switch (Info->Blueprint.fly.Path.Type) {
+                    case Path_Type_Stop: {
+                        Info->Blueprint.fly.Path.Type = Path_Type_Loop;
+                    } break;
+
+                    case Path_Type_Loop: {
+                        Info->Blueprint.fly.Path.Type = Path_Type_Reverse;
+                    } break;
+
+                    case Path_Type_Reverse: {
+                        Info->Blueprint.fly.Path.Type = Path_Type_Follow;
+                    } break;
+
+                    case Path_Type_Follow: {
+                        Info->Blueprint.fly.Path.Type = Path_Type_Stop;
+                    } break;                    
+                }
+            }
+
+            for (s32 i = 0; i < Info->Blueprint.fly.Path.Points.Count; i++) {
+              UiEnd();
+                if(i < Info->Blueprint.fly.Path.Points.Count - 1){
+                    DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path.Points[i].Position, Info->Blueprint.fly.Path.Points[i + 1].Position, Blue_Color); 
+                }
+                if (Info->Blueprint.fly.Path.Type == Path_Type_Loop){
+                    DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path.Points[Info->Blueprint.fly.Path.Points.Count - 1].Position, Info->Blueprint.fly.Path.Points[0].Position, Blue_Color);     
+                }
+
+                DrawCircle(State->Camera, transform {Info->Blueprint.fly.Path.Points[i].Position, 0.0f, 0.1f}, Blue_Color, false);
                 UiBegin();
-                auto CanvasPoint = WorldToCanvasPoint(State->Camera, Info->Blueprint.fly.Path[i].Position);
+                auto CanvasPoint = WorldToCanvasPoint(State->Camera, Info->Blueprint.fly.Path.Points[i].Position);
                 auto UiPoint = CanvasToUiPoint(Ui, CanvasPoint);
                 auto Cursor = UiBeginText(Ui, Ui->CurrentFont, UiPoint.X - 10, UiPoint.Y - 10, true, Red_Color, 0.3f);
                 UiWrite(&Cursor, "%d", i);
@@ -764,7 +877,7 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
 
                 if (State->Editor.DeleteButtonSelected) {
                     if (UiButton(UiControl, UI_ID(i), Rect)) 
-                        RemovePathPoint(&Info->Blueprint.fly.Path, i);
+                        RemovePathPoint(&Info->Blueprint.fly.Path.Points, i);
                     
                 } 
                 else if (UiDragable(UiControl, UI_ID(i), Rect, &DeltaPosition)) {                    
@@ -773,8 +886,12 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
                     
                     UiPoint = UiPoint + DeltaPosition;
                     auto NewCenterCanvasPoint = UiToCanvasPoint(Ui, UiPoint);
-                    Info->Blueprint.fly.Path[i].Position = CanvasToWorldPoint(State->Camera, NewCenterCanvasPoint);
+                    Info->Blueprint.fly.Path.Points[i].Position = CanvasToWorldPoint(State->Camera, NewCenterCanvasPoint);
                 } 
+            }
+
+            switch(Info->Blueprint.fly.Path.Type) {
+
             }
         }
     }
@@ -825,8 +942,8 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
             u32 XPathPoint = TimeLineRect.Left - 20;
 
-            for (s32 i = 0; i < State->Editor.CurrentInfo->Blueprint.fly.Path.Count; i++) {
-                u32 YPathpoint = (State->Editor.CurrentInfo->Blueprint.fly.Path[i].Time / State->Level.Duration) * (TimeLineRect.Top - TimeLineRect.Bottom) + TimeLineRect.Bottom;
+            for (s32 i = 0; i < State->Editor.CurrentInfo->Blueprint.fly.Path.Points.Count; i++) {
+                u32 YPathpoint = (State->Editor.CurrentInfo->Blueprint.fly.Path.Points[i].Time + State->Editor.CurrentInfo->Blueprint.SpawnTime) / State->Level.Duration * (TimeLineRect.Top - TimeLineRect.Bottom) + TimeLineRect.Bottom;
 
                 auto Cursor = UiBeginText(Ui, &State->Assets.DefaultFont, XPathPoint, YPathpoint, true, Red_Color, 0.3);
                 UiWrite(&Cursor, "%d", i);
@@ -1484,8 +1601,11 @@ int main(int argc, char* argv[]) {
     State.Assets.IdleButtonTexture = LoadTexture("data/Kenney/PNG/blue_button02.png");
     State.Assets.HotButtonTexture = LoadTexture("data/Kenney/PNG/blue_button03.png");
     State.Assets.DeleteButtonTexture = LoadTexture("data/Kenney/PNG/grey_boxCross.png");
-    State.Assets.AddPathButton = LoadTexture("data/Kenney/PNG/blue_boxTick.png");
-
+    State.Assets.AddPathButtonTexture = LoadTexture("data/Kenney/PNG/blue_boxTick.png");
+    State.Assets.PathStopButtonTexture = LoadTexture("data/icons8/icons8-pause-64.png");
+    State.Assets.PathLoopButtonTexture = LoadTexture("data/icons8/icons8-replay-64.png");
+    State.Assets.PathReverseButtonTexture = LoadTexture("data/icons8/icons8-rewind-64.png");
+    State.Assets.PathFollowButtonTexture = LoadTexture("data/Kenney/followPath.png");
     { 
         SDL_RWops* Op = SDL_RWFromFile("C:/Windows/Fonts/Arial.ttf", "rb");
         s64 ByteCount = Op->size(Op);

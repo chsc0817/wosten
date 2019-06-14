@@ -250,6 +250,17 @@ void UiLine(ui_context *Ui, s32 X0, s32 Y0, s32 X1, s32 Y1,  color Color){
     glEnd();
 }
 
+SDL_Rect RectToSDLRect(rect Rect) {
+    SDL_Rect Result;
+
+    Result.x = Rect.Left;
+    Result.y = Rect.Top;
+    Result.w = Rect.Right - Rect.Left;
+    Result.h = Rect.Top - Rect.Bottom;
+
+    return Result;
+}
+
 void UiRect(ui_context *Ui, s32 X, s32 Y, s32 Width, s32 Height, color RectColor, bool IsFilled = true){
 	
     glDisable(GL_TEXTURE_2D);
