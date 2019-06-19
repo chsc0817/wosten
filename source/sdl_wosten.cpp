@@ -114,11 +114,14 @@ struct path_point{
 #define template_array_static_count 10
 #include "template_array.h"
 
+struct entity_spawn_info;
+
 struct path {
     path_template Points;
     path_type Type;
-    f32 TransitionTime; //time it takes to go back to the first point if Path_Type_Loop is chosen or the delay to the leading entity if it is Path_Type_Follow
-    s32 Digit; 
+    f32 TransitionTime; //time it takes to go back to the first point if Path_Type_Loop is chosen or the delay to the leading entity if it is Path_Type_Follow 
+    u64 IDFollowing;
+    entity_spawn_info *Following;
 };
 
 struct entity {
@@ -135,10 +138,9 @@ struct entity {
     
     union {
         struct {
-            f32 FlipCountdown, FlipInterval;
             vec2 Velocity;
             f32 FireCountdown;
-            path Path;
+            path Path;            
         } fly;
         
         struct {
@@ -149,8 +151,7 @@ struct entity {
         struct {
             u32 Damage;   
         } bullet;
-    };
-    
+    };    
 };
 
 #define template_array_name entity_buffer
@@ -172,6 +173,7 @@ struct collision {
 };
 
 struct entity_spawn_info {
+    u64 ID;
     entity Blueprint;
     bool WasNotSpawned;
 };
@@ -181,7 +183,6 @@ struct entity_spawn_info {
 #define template_array_is_buffer 
 #define template_array_static_count 256
 #include "template_array.h"
-
 
 struct assets {
     //doesn't include bomb texture or font
@@ -333,14 +334,12 @@ entity MakeChicken(vec2 WorldPositionOffset) {
     Result.Hp = Result.MaxHp;
     Result.Type = Entity_Type_Fly;
     Result.CollisionTypeMask = FLAG(Entity_Type_Player) | FLAG(Entity_Type_Bullet); 
-    Result.fly.FlipInterval = 1.5f;
-    Result.fly.FlipCountdown = Result.fly.FlipInterval * randZeroToOne();
     Result.fly.FireCountdown = 0.25f;
     Result.fly.Velocity = vec2{1.0f, 0.1f};    
-    Result.XForm.Pos = vec2{Result.fly.Velocity.X * Result.fly.FlipInterval * -0.5f, randZeroToOne()} + Result.fly.Velocity * (Result.fly.FlipInterval - Result.fly.FlipCountdown) + WorldPositionOffset;   
+    Result.XForm.Pos = vec2{-0.5f, randZeroToOne()} + WorldPositionOffset;   
     Result.RelativeDrawCenter = vec2 {0.5f, 0.44f};
     Result.BlinkDuration = 0.1f;
-    Result.BlinkTime = 0.0f;
+
 
     return Result;
 }
@@ -420,6 +419,24 @@ void DrawAllEntities(game_state *State) {
     
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
+}
+
+void RestoreFollowingPointer(entity_spawn_infos *Infos) {
+    for (u32 i = 0; i < Infos->Count; i++) {
+        if ((*Infos)[i].Blueprint.Type != Entity_Type_Fly)
+            continue;
+
+        auto IDFollowing = (*Infos)[i].Blueprint.fly.Path.IDFollowing;
+        if (IDFollowing == 0)
+            continue;
+
+        for (u32 j = 0; i < Infos->Count; j++) {
+            if (IDFollowing = (*Infos)[j].ID) {
+                (*Infos)[i].Blueprint.fly.Path.Following = &(*Infos)[j];
+                break;
+            }
+        }
+    }
 }
 
 void initGame (game_state *State) {
@@ -638,6 +655,23 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
 
 void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
     assert(Entity->Type == Entity_Type_Fly);
+
+    if (Entity->fly.Path.Type == Path_Type_Follow) {
+        if (Entity->fly.Path.Following != NULL) {
+            auto DummyFly = Entity->fly.Path.Following->Blueprint;
+            UpdateFlyPosition(&DummyFly, LevelTime + Entity->fly.Path.TransitionTime);
+            Entity->XForm.Pos = DummyFly.XForm.Pos;
+
+        }
+        return;
+    }
+
+    if (Entity->fly.Path.Points.Count == 0) 
+        return; 
+    else if (Entity->fly.Path.Points.Count == 1){
+        Entity->XForm.Pos = Entity->fly.Path.Points[0].Position;
+        return;
+    } 
     
     u32 MinPathIndex = Entity->fly.Path.Points.Count;
     f32 Time = LevelTime - Entity->SpawnTime;
@@ -650,22 +684,85 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
     }
 
     if (MinPathIndex == Entity->fly.Path.Points.Count) {
+        //fly not on path yet
         Entity->XForm.Pos = Entity->fly.Path.Points[0].Position;
     }
     else if (MinPathIndex == (Entity->fly.Path.Points.Count - 1)) {
-
+        //fly after last point
+        auto LastPoint = &Entity->fly.Path.Points[Entity->fly.Path.Points.Count - 1];
+        f32 TransitionTime = Entity->fly.Path.TransitionTime;
+        
         switch (Entity->fly.Path.Type) {
             case Path_Type_Stop: {
-                 Entity->XForm.Pos = Entity->fly.Path.Points[MinPathIndex].Position;
+                 Entity->XForm.Pos = LastPoint->Position;
+                 return;
             } break;
 
             case Path_Type_Loop: {
+                f32 CompleteRound = LastPoint->Time + TransitionTime;
                 
+                if (Time < CompleteRound) {
+                    path_point *FirstPoint = &Entity->fly.Path.Points[0];
+                    f32 l = (Time - LastPoint->Time) / TransitionTime; // == (Time - LastPoint->Time) / (LastPoint->Time + TransitionTime) - LastPoint->Time
+                    
+                    Entity->XForm.Pos = vec2{lerp(LastPoint->Position.X, FirstPoint->Position.X, l),
+                                             lerp(LastPoint->Position.Y, FirstPoint->Position.Y, l)
+                                        };
+                }
+                else {
+                    f32 CurrentRound = Time - CompleteRound; 
+                    while (CurrentRound > CompleteRound){
+                        CurrentRound -= CompleteRound;     
+                    }
+
+                    UpdateFlyPosition(Entity, CurrentRound + Entity->SpawnTime);
+                }
+                return;                
             }
-        }
-       
+
+            case Path_Type_Reverse: {
+                f32 CurrentRound = Time - LastPoint->Time; 
+                bool OnWayBack = true;
+
+                while (CurrentRound > LastPoint->Time){
+                    CurrentRound -= LastPoint->Time;
+                    OnWayBack = !OnWayBack;     
+                }
+
+                if(OnWayBack){
+                    u32 MaxPathIndex;                    
+
+                    for (MaxPathIndex = Entity->fly.Path.Points.Count - 1; MaxPathIndex > 0; MaxPathIndex--) {
+                        f32 Time = Entity->fly.Path.Points[MaxPathIndex].Time - Entity->fly.Path.Points[MaxPathIndex - 1].Time;
+                        if (CurrentRound <= Time)
+                            break;
+                        else 
+                            CurrentRound -= Time;
+                    }
+                    auto From = &Entity->fly.Path.Points[MaxPathIndex];
+                    auto To = &Entity->fly.Path.Points[MaxPathIndex - 1];
+                    f32 l = CurrentRound / (From->Time - To->Time);
+
+                    Entity->XForm.Pos = vec2{lerp(From->Position.X, To->Position.X, l),
+                                             lerp(From->Position.Y, To->Position.Y, l)
+                                        };
+                } 
+                else {
+                    UpdateFlyPosition(Entity, CurrentRound + Entity->SpawnTime);
+                }
+                return;
+            } break;
+
+            //case Path_Type_Follow seperate at the beginning of the function
+
+            default: {
+                u32 InvalidPathType = 0;
+                assert(InvalidPathType);
+            }
+        }       
     }
     else { 
+        //fly on path
         path_point *CurrentPath = &Entity->fly.Path.Points[MinPathIndex];
         path_point *NextPath = &Entity->fly.Path.Points[MinPathIndex + 1];
         f32 l = (Time - CurrentPath->Time) / (NextPath->Time - CurrentPath->Time);
@@ -768,12 +865,12 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
             Info->WasNotSpawned = true;
             Info->Blueprint = MakeChicken(State->Camera.WorldPosition);
             Info->Blueprint.SpawnTime = State->Level.Time;
+            Info->ID = UI_ID(&State->Level.SpawnInfos.Count);
             path_point *Path = Push(&Info->Blueprint.fly.Path.Points);
             Path->Position = Info->Blueprint.XForm.Pos;
             Path->Time = 0;
             Info->Blueprint.fly.Path.Type = Path_Type_Stop;
             Info->Blueprint.fly.Path.TransitionTime = 0.0f;
-            Info->Blueprint.fly.Path.Digit = 0;
             State->Editor.CurrentInfo = Info; 
         }
     }
@@ -1008,20 +1105,35 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         if(State->Editor.DeleteButtonSelected) {
             if (UiButton(UiControl, Id, Rect)) 
             {
-                State->Level.SpawnInfos[SpawnIndex] = State->Level.SpawnInfos[State->Level.SpawnInfos.Count - 1];
+                u64 IDDeleted = State->Level.SpawnInfos[SpawnIndex].ID;
+
+                for(u32 i = 0; i < State->Level.SpawnInfos.Count; i++) {
+                    if (State->Level.SpawnInfos[i].Blueprint.Type != Entity_Type_Fly)
+                        continue;
+                    else if (State->Level.SpawnInfos[i].Blueprint.fly.Path.IDFollowing == IDDeleted) {
+                        State->Level.SpawnInfos[i].Blueprint.fly.Path.IDFollowing = 0;
+                        State->Level.SpawnInfos[i].Blueprint.fly.Path.Following = NULL;
+                    }                    
+                }
+
+                State->Level.SpawnInfos[SpawnIndex] = State->Level.SpawnInfos[State->Level.SpawnInfos.Count - 1]; 
                 Pop(&State->Level.SpawnInfos);  
 
                 if (State->Editor.CurrentInfo == Info) 
                     State->Editor.CurrentInfo = NULL;
+
             }
         }
         else {
             if (UiButton(UiControl, Id, Rect, 2)) {
+                if (State->Editor.CurrentInfo != NULL && GameInput.SlowMovementKey.IsPressed) {
+                    State->Editor.CurrentInfo->Blueprint.fly.Path.Following = Info;
+                    State->Editor.CurrentInfo->Blueprint.fly.Path.IDFollowing = Info->ID;
+                } 
+                else 
                 State->Editor.CurrentInfo = Info;
-
             }
-        }
-        
+        }        
         SpawnIndex++;
     }
     
@@ -1710,6 +1822,8 @@ int main(int argc, char* argv[]) {
       
     State.Level = LoadLevel("data/levels/Level.bin");
     SaveLevel("data/levels/LevelBackup.bin", State.Level);
+    
+    RestoreFollowingPointer(&State.Level.SpawnInfos);
     initGame(&State);
     
     input GameInput = {};
