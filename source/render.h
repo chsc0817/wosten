@@ -82,23 +82,6 @@ struct font {
     s32 BaselineBottomOffset;
 };
 
-struct ui_context {
-    font *CurrentFont;
-    s32 Width, Height;
-};
-
-struct ui_text_cursor {
-    ui_context *Context;
-    font *Font;
-    f32 Scale;
-    s32 StartX, StartY;
-    s32 CurrentX, CurrentY;
-    rect Rect;
-    bool RectIsInitialized;
-    bool DoRender;
-    color Color;
-};
-
 void DrawQuad(camera Camera, transform XForm, vec2 Center = {0.5f, 0.5f}){
 	
     glBegin(GL_QUADS);
@@ -195,243 +178,17 @@ void DrawLine(camera Camera, transform XForm, vec2 From, vec2 To, color LineColo
     glEnd();
 }
 
-vec2 UiToCanvasPoint(ui_context *Ui, vec2 UiPoint){
-    vec2 Result = (UiPoint * vec2{ 2.0f / Ui->Width, 2.0f / Ui->Height }) + -1.0f;
-    
-    return Result;
-}
-
-vec2 UiToCanvasPoint(ui_context *Ui, s32 X, s32 Y){
-    return UiToCanvasPoint(Ui, vec2{ (f32)X, (f32)Y });
-}
-
-vec2 CanvasToUiPoint(ui_context *Ui, vec2 CanvasPoint){
-    vec2 Result = ((CanvasPoint + 1) * vec2{(f32) Ui->Width, (f32) Ui->Height}) * 0.5f;
-    
-    return Result;
-}
-
-void UiBegin()
-{
-    glEnable(GL_TEXTURE_2D);
-    
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
-    glEnable(GL_ALPHA_TEST);
-    glAlphaFunc(GL_GEQUAL, 0.1f);
-    
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-}
-
-void UiEnd()
-{
-    //glDisable(GL_BLEND);
-    glDisable(GL_TEXTURE_2D);
-    //glDisable(GL_ALPHA_TEST);
-    glEnable(GL_SCISSOR_TEST);
-    glEnable(GL_DEPTH_TEST);
-}
-
-void UiLine(ui_context *Ui, s32 X0, s32 Y0, s32 X1, s32 Y1,  color Color){
-	
-    glDisable(GL_TEXTURE_2D);
-    glBegin(GL_LINES);
-    
-    glColor4fv(Color.Values);        
-    
-    vec2 V = UiToCanvasPoint(Ui, X0, Y0);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    V = UiToCanvasPoint(Ui, X1, Y1);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    glEnd();
-}
-
 SDL_Rect RectToSDLRect(rect Rect) {
     SDL_Rect Result;
-
+    
     Result.x = Rect.Left;
     Result.y = Rect.Top;
     Result.w = Rect.Right - Rect.Left;
     Result.h = Rect.Top - Rect.Bottom;
-
-    return Result;
-}
-
-void UiRect(ui_context *Ui, s32 X, s32 Y, s32 Width, s32 Height, color RectColor, bool IsFilled = true){
-	
-    glDisable(GL_TEXTURE_2D);
-    
-    if (IsFilled) {
-        glBegin(GL_QUADS);
-    }
-    else {
-        glBegin(GL_LINE_LOOP);
-    }
-    
-    glColor4fv(RectColor.Values);        
-    
-    vec2 V = UiToCanvasPoint(Ui, X, Y);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    V = UiToCanvasPoint(Ui, X + Width, Y);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    V = UiToCanvasPoint(Ui, X + Width, Y + Height);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    V = UiToCanvasPoint(Ui, X, Y + Height);
-    glVertex3f(V.X, V.Y, -0.9f);
-    
-    glEnd();
-}
-
-void UiRect(ui_context *Ui, rect Rect, color RectColor, bool IsFilled = true) { 
-    UiRect(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, RectColor, IsFilled);
-}
-
-void UiTexturedRect(ui_context *Ui, texture Texture, s32 X, s32 Y, s32 Width, s32 Height, s32 SubTextureX, s32 SubTextureY, s32 SubTextureWidth, s32 SubTextureHeight, color RectColor = White_Color) {
-    glBindTexture(GL_TEXTURE_2D, Texture.Object);
-    glEnable(GL_TEXTURE_2D);
-    
-    glBegin(GL_QUADS);
-    glColor4fv(RectColor.Values);        
-    vec2 UV = {
-        SubTextureX / (f32) Texture.Width,
-        SubTextureY / (f32) Texture.Height
-    };
-    vec2 UVSize = {
-        SubTextureWidth / (f32) Texture.Width,
-        SubTextureHeight / (f32) Texture.Height
-    };
-    
-    glTexCoord2f(UV.X, UV.Y);  	
-    vec2 v = UiToCanvasPoint(Ui, X, Y);
-    glVertex3f(v.X, v.Y, -0.9f);
-    
-    glTexCoord2f(UV.X + UVSize.X, UV.Y);  	
-    v = UiToCanvasPoint(Ui, X + Width, Y);
-    glVertex3f(v.X, v.Y, -0.9f);
-    
-    glTexCoord2f(UV.X + UVSize.X, UV.Y + UVSize.Y);  	
-    v = UiToCanvasPoint(Ui, X + Width, Y + Height);
-    glVertex3f(v.X, v.Y, -0.9f);
-    
-    glTexCoord2f(UV.X, UV.Y + UVSize.Y);  	
-    v = UiToCanvasPoint(Ui, X, Y + Height);
-    glVertex3f(v.X, v.Y, -0.9f);
-	
-    glEnd();
-}
-
-void UiTexturedRect(ui_context *Ui, texture Texture, rect Rect, rect SubTextureRect, color RectColor = White_Color) {
-    UiTexturedRect(Ui, Texture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, SubTextureRect.Left, SubTextureRect.Bottom, SubTextureRect.Right - SubTextureRect.Left, SubTextureRect.Top - SubTextureRect.Bottom, RectColor);
-} 
-
-ui_text_cursor UiBeginText(ui_context *Context, font *CurrentFont, s32 X, s32 Y, bool DoRender = true, color Color = White_Color, f32 Scale = 1.0f) {
-    ui_text_cursor Result;
-    Result.Context = Context;
-    Result.StartX = X;
-    Result.StartY = Y;
-    Result.CurrentX = X;
-    Result.CurrentY = Y;
-    Result.Font = CurrentFont;
-    Result.Scale = Scale;
-    Result.Color = Color;
-    Result.DoRender = DoRender;
-    Result.Rect = MakeRect(X, Y, X, Y);
-    Result.RectIsInitialized = false;
     
     return Result;
 }
 
-rect UiText(ui_text_cursor *Cursor, const char *Text, u32 TextCount) {
-    
-    rect TextRect = MakeEmptyRect();
-    
-    for (u32 i = 0; i < TextCount; i++) {
-        if(Text[i] == '\n') {
-            Cursor->CurrentX = Cursor->StartX;
-            Cursor->CurrentY -= (Cursor->Font->MaxGlyphHeight + 1) *Cursor->Scale;
-        }
-        
-        glyph *FontGlyph = Cursor->Font->Glyphs + Text[i];
-        if (FontGlyph->Code == 0) {
-            continue;
-        }
-        
-        vec2 BottomLeft = {
-            Cursor->CurrentX + FontGlyph->DrawXOffset * Cursor->Scale,
-            Cursor->CurrentY + FontGlyph->DrawYOffset * Cursor->Scale};
-        
-        vec2 TopRight = {
-            BottomLeft.X + FontGlyph->Width * Cursor->Scale,
-            BottomLeft.Y + FontGlyph->Height * Cursor->Scale};
-        
-        rect GlyphRect = MakeRect(BottomLeft, TopRight);
-        
-        TextRect = Merge(TextRect, GlyphRect);
-        
-        if (Cursor->DoRender) {
-            UiTexturedRect(Cursor->Context, Cursor->Font->Texture, BottomLeft.X, BottomLeft.Y, FontGlyph->Width * Cursor->Scale, FontGlyph->Height * Cursor->Scale, FontGlyph->X, FontGlyph->Y, FontGlyph->Width, FontGlyph->Height,  Cursor->Color);
-        }
-        
-        Cursor->CurrentX += FontGlyph->DrawXAdvance * Cursor->Scale;
-    }
-    
-    if (Cursor->RectIsInitialized) { 
-        Cursor->Rect = Merge(Cursor->Rect, TextRect);
-    }
-    else {
-        Cursor->Rect = TextRect;
-        Cursor->RectIsInitialized = IsValid(TextRect);
-    } 
-    
-    return TextRect;
-}
-
-rect UiWriteVA(ui_text_cursor *Cursor, const char *Format, va_list Parameters) {
-    char Buffer[2048];
-    
-    u32 ByteCount = vsnprintf(ARRAY_WITH_COUNT(Buffer), Format, Parameters);
-    return UiText(Cursor, Buffer, ByteCount);
-}
-
-rect UiWrite(ui_text_cursor *Cursor, const char *Format, ...) {
-    va_list Parameters;
-    va_start(Parameters, Format);
-    auto Result = UiWriteVA(Cursor, Format, Parameters);
-    va_end(Parameters);
-    
-    return Result;
-}
-
-rect UiAlignedWrite(ui_text_cursor Cursor, vec2 Alignment, const char *Format, ...) {
-    
-    auto DummyCursor = UiBeginText(Cursor.Context, Cursor.Font, Cursor.CurrentX, Cursor.CurrentY, false, White_Color, Cursor.Scale);
-    
-    va_list Parameters;
-    va_start(Parameters, Format);
-    
-    UiWriteVA(&DummyCursor, Format, Parameters); 
-    
-    
-    vec2 DummySize = DummyCursor.Rect.TopRight - DummyCursor.Rect.BottomLeft;
-    vec2 Offset = vec2{(f32) Cursor.CurrentX, (f32)Cursor.CurrentY} - DummyCursor.Rect.BottomLeft - DummySize * Alignment;
-    
-    DummyCursor.Rect.BottomLeft = DummyCursor.Rect.BottomLeft + Offset;
-    DummyCursor.Rect.TopRight = DummyCursor.Rect.TopRight + Offset;
-    
-    Cursor = UiBeginText(Cursor.Context, Cursor.Font, Cursor.CurrentX + Offset.X, Cursor.CurrentY + Offset.Y, Cursor.DoRender, Cursor.Color, Cursor.Scale);
-    UiWriteVA(&Cursor, Format, Parameters); 
-    
-    va_end(Parameters);
-    
-    return DummyCursor.Rect;
-}
 /*
 void UiTextWithBorder(ui_text_cursor *cursor,Rect Border, const char *text, u32 TextCount, Text_Align Alignment) {
     const char *CurrentLine = "";
@@ -471,12 +228,6 @@ void uiWriteWithBorder(ui_text_cursor *cursor, Rect Border, Text_Align Alignment
     va_end(parameters);
 }
 */
-void UiBar(ui_context *Ui, s32 X, s32 Y, s32 Width, s32 Height, f32 Percentage, color EmptyColor, color FullColor) {
-    
-    UiRect(Ui, X, Y, Width, Height, EmptyColor, false);
-    UiRect(Ui, X, Y, Width * CLAMP(Percentage, 0, 1), Height, FullColor);
-    
-}
 
 texture LoadTexture(u8 *Data, s32 Width, s32 Height, u8 BytesPerPixel, GLenum Filter = GL_LINEAR, bool FlipY = true)
 {

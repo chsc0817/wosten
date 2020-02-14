@@ -15,6 +15,7 @@
 
 #include "defines.h"
 #include "render.h"
+#include "ui.h"
 
 #include "ui_control.h"
 
@@ -207,12 +208,12 @@ struct assets {
     texture PathLoopButtonTexture;
     texture PathReverseButtonTexture;
     texture PathFollowButtonTexture;
-
+    
     font DefaultFont;
-
+    
     Mix_Music *Bgm;
     Mix_Chunk *SfxBomb, *SfxDeath, *SfxShoot;
-
+    
 };
 
 
@@ -279,7 +280,7 @@ void SaveLevel(char *FileName, level Level) {
 struct config {
     s32 Width, Height;
     s32 BgmVolume, SfxVolume;
-
+    
 };
 
 config LoadConfig(char *FileName) {
@@ -287,8 +288,8 @@ config LoadConfig(char *FileName) {
     
     if (File == NULL)
         return {640, 480,   //window size
-                30, 30      //volume
-        };
+        30, 30      //volume
+    };
     
     config Result;
     
@@ -308,7 +309,7 @@ void SaveConfig(char *FileName, SDL_Window *Window) {
     SDL_GetWindowSize(Window, &Config.Width, &Config.Height);
     Config.BgmVolume = Mix_VolumeMusic(-1);
     Config.SfxVolume = Mix_Volume(0, -1);
-
+    
     size_t WriteObjectCount = SDL_RWwrite(File, &Config, sizeof(Config), 1);
     
     assert(WriteObjectCount == 1);
@@ -339,20 +340,20 @@ entity MakeChicken(vec2 WorldPositionOffset) {
     Result.XForm.Pos = vec2{-0.5f, randZeroToOne()} + WorldPositionOffset;   
     Result.RelativeDrawCenter = vec2 {0.5f, 0.44f};
     Result.BlinkDuration = 0.1f;
-
-
+    
+    
     return Result;
 }
 
 void DrawEntity(game_state *State, entity *Entity, color Color = White_Color){
-    #ifdef DEBUG_UI
-        transform collisionTransform = Entity->XForm;
-        collisionTransform.Scale = 2 * Entity->CollisionRadius;
-        DrawCircle(State->Camera, collisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
-        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
-        DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
-    #endif    
-
+#ifdef DEBUG_UI
+    transform collisionTransform = Entity->XForm;
+    collisionTransform.Scale = 2 * Entity->CollisionRadius;
+    DrawCircle(State->Camera, collisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false);
+    DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{1, 0}, color{1.0f, 0.0f, 0.0f, 1.0f});
+    DrawLine(State->Camera, collisionTransform, vec2{0, 0}, vec2{0, 1}, color{0.0f, 1.0f, 0.0f, 1.0f});
+#endif    
+    
     switch (Entity->Type) {
         
         case Entity_Type_Player: {
@@ -425,11 +426,11 @@ void RestoreFollowingPointer(entity_spawn_infos *Infos) {
     for (u32 i = 0; i < Infos->Count; i++) {
         if ((*Infos)[i].Blueprint.Type != Entity_Type_Fly)
             continue;
-
+        
         auto IDFollowing = (*Infos)[i].Blueprint.fly.Path.IDFollowing;
         if (IDFollowing == 0)
             continue;
-
+        
         for (u32 j = 0; i < Infos->Count; j++) {
             if (IDFollowing = (*Infos)[j].ID) {
                 (*Infos)[i].Blueprint.fly.Path.Following = &(*Infos)[j];
@@ -461,14 +462,14 @@ void initGame (game_state *State) {
     State->Player->RelativeDrawCenter = vec2 {0.5f, 0.4f};  
 };
 
-void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, bool *DoContinue){
+void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, font *Font, f32 DeltaSeconds, input GameInput, bool *DoContinue){
     char *Items[] = {
         "New game",
         "Load Game",
         "Settings",                 
         "Quit Game"
     };
-    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.7f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
+    auto Cursor = UiBeginText(Ui, Font, Ui->Width * 0.5f, Ui->Height * 0.7f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
     
     for (u32 i = 0; i < ARRAY_COUNT(Items); i++) {
         //uiRect(&ui, Cursor.CurrentX - 2, Cursor.CurrentY - 2, 5, 5, color{0.5f, 1.0f, 0.2f, 1.0f}, true);
@@ -481,7 +482,7 @@ void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 D
         }
         
         f32 Border = Cursor.Scale * 15;
-        auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - Ui->CurrentFont->BaselineBottomOffset * Cursor.Scale - Border, 0, Ui->CurrentFont->MaxGlyphHeight * Cursor.Scale + 2 * Border);
+        auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - Font->BaselineBottomOffset * Cursor.Scale - Border, 0, Font->MaxGlyphHeight * Cursor.Scale + 2 * Border);
         Rect = Merge(Rect, MinRect);
         
         Rect.Left  -= Border;
@@ -512,69 +513,65 @@ void UpdateTitle(game_state *State, ui_context *Ui, ui_control *UiControl, f32 D
                 
                 case 0: { State->Mode = Mode_Game;
                 } break;
-
+                
                 case 2: { State->Mode = Mode_Settings;
                 } break;
                 
                 case 3: { *DoContinue = false;
                 } break;
-
+                
                 default: printf("you selected %s\n", Items[i]);
             }
         }
         
         if ((UiControl->ActiveId == Id) || (UiControl->HotId == Id))
-            UiTexturedRect(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
+            UiTexturedRectangle(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
         else
-            UiTexturedRect(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
+            UiTexturedRectangle(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
         
         Cursor.CurrentX -= Offset;
         Cursor.CurrentY += CursorYOffset;
-        UiBegin();
         UiWrite(&Cursor, "%s\n", Items[i]);
-        UiEnd();
         Cursor.CurrentY -= 20 * Cursor.Scale + 2 * Border + CursorYOffset;
     }
 }
 
-void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput, SDL_Window *Window) {
+void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, font *Font, f32 DeltaSeconds, input GameInput, SDL_Window *Window) {
     //Volume
-    UiBegin();
-        //Bgm
+    //Bgm
     f32 MinVolPos = Ui->Width * 0.5f - Ui->Width * 0.4f;
     f32 MaxVolPos = Ui->Width * 0.5f + Ui->Width * 0.2f;
     f32 VolPosY = Ui->Height  - Ui->Height * 0.3f;
     rect VolBar = MakeRect(MinVolPos, VolPosY - 15, MaxVolPos, VolPosY + 15);
-
+    
     f32 CurrentVolPos = (MaxVolPos - MinVolPos) * (Mix_VolumeMusic(-1) / (f32)MIX_MAX_VOLUME) + MinVolPos;
     //vec2 Delta;
-
-    UiRect(Ui, VolBar, Green_Color, false);
-    UiRect(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
     
-    ui_text_cursor VolCursor = UiBeginText(Ui, Ui->CurrentFont, VolBar.Right + 10, VolPosY - 15);
+    UiRectangle(Ui, VolBar, Green_Color, false);
+    UiRectangle(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
+    
+    ui_text_cursor VolCursor = UiBeginText(Ui, Font, VolBar.Right + 10, VolPosY - 15);
     UiWrite(&VolCursor, "BGM: %d%%", (s32)(100 * (CurrentVolPos - MinVolPos) / (MaxVolPos - MinVolPos)));
-
+    
     // MIX_MIN_VOLUME == 0
     f32 DiffToNextVolPos = (MaxVolPos - MinVolPos) / (f32)(MIX_MAX_VOLUME - 0 + 1);
     
     if (UiDragable(UiControl, UI_ID0, MakeRect(CurrentVolPos - 10, VolPosY - 15, CurrentVolPos + 10, VolPosY + 15), &vec2{})) {
         Mix_VolumeMusic((GameInput.MousePos.X - MinVolPos) / DiffToNextVolPos + 0 - 1);
     }
-
-        //Sfx
+    
+    //Sfx
     VolPosY -= 60;
     VolBar.Bottom -= 60;
     VolBar.Top -= 60;
     CurrentVolPos = (MaxVolPos - MinVolPos) * (Mix_Volume(0, -1) / (f32)MIX_MAX_VOLUME) + MinVolPos;
     
-    UiRect(Ui, VolBar, Green_Color, false);
-    UiRect(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
+    UiRectangle(Ui, VolBar, Green_Color, false);
+    UiRectangle(Ui, VolBar.Left, VolBar.Bottom, CurrentVolPos - MinVolPos, VolBar.Top - VolBar.Bottom, Green_Color);
     
-    VolCursor = UiBeginText(Ui, Ui->CurrentFont, VolBar.Right + 10, VolPosY - 15);
+    VolCursor = UiBeginText(Ui, Font, VolBar.Right + 10, VolPosY - 15);
     UiWrite(&VolCursor, "SFX: %d%%", 100 * Mix_Volume(0, -1) / MIX_MAX_VOLUME);
-    UiEnd();
-
+    
     vec2 Ratio;
     
     if (UiRatio(UiControl, UI_ID0, VolBar, &Ratio)) {
@@ -583,7 +580,7 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
     }
     /*
     if (UiDragable(UiControl, UI_ID0, MakeRect(CurrentVolPos - 5, VolPosY - 5, CurrentVolPos + 5, VolPosY + 5), &Delta)) {
-       
+    
         Mix_VolumeMusic(Mix_VolumeMusic(-1) + Delta.X);            
         CurrentVolPos += Delta.X;
         if ((CurrentVolPos) > MaxVolPos) {
@@ -593,13 +590,13 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
             CurrentVolPos = MinVolPos;
             Mix_VolumeMusic(0);
         } 
-
+        
     }
     UiLine(Ui, CurrentVolPos, VolPosY - 10, CurrentVolPos, VolPosY + 10, Red_Color);
     */
-
+    
     //Save Button
-    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.2f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
+    auto Cursor = UiBeginText(Ui, Font, Ui->Width * 0.5f, Ui->Height * 0.2f, true, color{0.0f, 1.0f, 1.0f, 1.0f}, 2.0f);
     rect Rect;
     {
         auto DummyCursor = Cursor;
@@ -608,7 +605,7 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
     }
     
     f32 Border = Cursor.Scale * 15;
-    auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - Ui->CurrentFont->BaselineBottomOffset * Cursor.Scale - Border, 0, Ui->CurrentFont->MaxGlyphHeight * Cursor.Scale + 2 * Border);
+    auto MinRect = MakeRectWithSize(Rect.Left, Cursor.CurrentY - Font->BaselineBottomOffset * Cursor.Scale - Border, 0, Font->MaxGlyphHeight * Cursor.Scale + 2 * Border);
     Rect = Merge(Rect, MinRect);
     
     Rect.Left  -= Border;
@@ -626,7 +623,7 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
         State->Mode = Mode_Title;
         SaveConfig("data/config.bin", Window);
     }
-
+    
     if (UiControl->ActiveId == Id) {
         Cursor.Color = color{ 1.0f, 0.5f, 0.0f, 1.0f };
     }
@@ -638,34 +635,32 @@ void UpdateSettings(game_state *State, ui_context *Ui, ui_control *UiControl, f3
         Rect.Top += Cursor.Scale * 4;
         CursorYOffset = Cursor.Scale * 4;
     }
-
+    
     if ((UiControl->ActiveId == Id) || (UiControl->HotId == Id))
-        UiTexturedRect(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
+        UiTexturedRectangle(Ui, State->Assets.HotButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.HotButtonTexture.Width, State->Assets.HotButtonTexture.Height, White_Color);
     else
-        UiTexturedRect(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
-        
-
+        UiTexturedRectangle(Ui, State->Assets.IdleButtonTexture, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, 0, 0, State->Assets.IdleButtonTexture.Width, State->Assets.IdleButtonTexture.Height, White_Color);
+    
+    
     Cursor.CurrentX -= Offset;
     Cursor.CurrentY += CursorYOffset;
-    UiBegin();
     UiWrite(&Cursor, "%s\n", "Save");
-    UiEnd();
     Cursor.CurrentY -= 20 * Cursor.Scale + 2 * Border + CursorYOffset;
 }
 
 void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
     assert(Entity->Type == Entity_Type_Fly);
-
+    
     if (Entity->fly.Path.Type == Path_Type_Follow) {
         if (Entity->fly.Path.Following != NULL) {
             auto DummyFly = Entity->fly.Path.Following->Blueprint;
             UpdateFlyPosition(&DummyFly, LevelTime + Entity->fly.Path.TransitionTime);
             Entity->XForm.Pos = DummyFly.XForm.Pos;
-
+            
         }
         return;
     }
-
+    
     if (Entity->fly.Path.Points.Count == 0) 
         return; 
     else if (Entity->fly.Path.Points.Count == 1){
@@ -675,14 +670,14 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
     
     u32 MinPathIndex = Entity->fly.Path.Points.Count;
     f32 Time = LevelTime - Entity->SpawnTime;
-
+    
     for (u32 i = Entity->fly.Path.Points.Count; i > 0; i--) {
         if (Time >= Entity->fly.Path.Points[i - 1].Time) {
             MinPathIndex = i - 1;
             break;
         }
     }
-
+    
     if (MinPathIndex == Entity->fly.Path.Points.Count) {
         //fly not on path yet
         Entity->XForm.Pos = Entity->fly.Path.Points[0].Position;
@@ -694,10 +689,10 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
         
         switch (Entity->fly.Path.Type) {
             case Path_Type_Stop: {
-                 Entity->XForm.Pos = LastPoint->Position;
-                 return;
+                Entity->XForm.Pos = LastPoint->Position;
+                return;
             } break;
-
+            
             case Path_Type_Loop: {
                 f32 CompleteRound = LastPoint->Time + TransitionTime;
                 
@@ -706,32 +701,32 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
                     f32 l = (Time - LastPoint->Time) / TransitionTime; // == (Time - LastPoint->Time) / (LastPoint->Time + TransitionTime) - LastPoint->Time
                     
                     Entity->XForm.Pos = vec2{lerp(LastPoint->Position.X, FirstPoint->Position.X, l),
-                                             lerp(LastPoint->Position.Y, FirstPoint->Position.Y, l)
-                                        };
+                        lerp(LastPoint->Position.Y, FirstPoint->Position.Y, l)
+                    };
                 }
                 else {
                     f32 CurrentRound = Time - CompleteRound; 
                     while (CurrentRound > CompleteRound){
                         CurrentRound -= CompleteRound;     
                     }
-
+                    
                     UpdateFlyPosition(Entity, CurrentRound + Entity->SpawnTime);
                 }
                 return;                
             }
-
+            
             case Path_Type_Reverse: {
                 f32 CurrentRound = Time - LastPoint->Time; 
                 bool OnWayBack = true;
-
+                
                 while (CurrentRound > LastPoint->Time){
                     CurrentRound -= LastPoint->Time;
                     OnWayBack = !OnWayBack;     
                 }
-
+                
                 if(OnWayBack){
                     u32 MaxPathIndex;                    
-
+                    
                     for (MaxPathIndex = Entity->fly.Path.Points.Count - 1; MaxPathIndex > 0; MaxPathIndex--) {
                         f32 Time = Entity->fly.Path.Points[MaxPathIndex].Time - Entity->fly.Path.Points[MaxPathIndex - 1].Time;
                         if (CurrentRound <= Time)
@@ -742,19 +737,19 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
                     auto From = &Entity->fly.Path.Points[MaxPathIndex];
                     auto To = &Entity->fly.Path.Points[MaxPathIndex - 1];
                     f32 l = CurrentRound / (From->Time - To->Time);
-
+                    
                     Entity->XForm.Pos = vec2{lerp(From->Position.X, To->Position.X, l),
-                                             lerp(From->Position.Y, To->Position.Y, l)
-                                        };
+                        lerp(From->Position.Y, To->Position.Y, l)
+                    };
                 } 
                 else {
                     UpdateFlyPosition(Entity, CurrentRound + Entity->SpawnTime);
                 }
                 return;
             } break;
-
+            
             //case Path_Type_Follow seperate at the beginning of the function
-
+            
             default: {
                 u32 InvalidPathType = 0;
                 assert(InvalidPathType);
@@ -766,22 +761,22 @@ void UpdateFlyPosition (entity *Entity, f32 LevelTime) {
         path_point *CurrentPath = &Entity->fly.Path.Points[MinPathIndex];
         path_point *NextPath = &Entity->fly.Path.Points[MinPathIndex + 1];
         f32 l = (Time - CurrentPath->Time) / (NextPath->Time - CurrentPath->Time);
-
+        
         assert(Time < NextPath->Time);
-
+        
         Entity->XForm.Pos = vec2{lerp(CurrentPath->Position.X, NextPath->Position.X, l),
-                                 lerp(CurrentPath->Position.Y, NextPath->Position.Y, l)
-                            };
+            lerp(CurrentPath->Position.Y, NextPath->Position.Y, l)
+        };
     }
-                
+    
 }
 
 //assuming path are already in order except last point
 u32 SortPath(path_template *Path) {
     assert(Path->Count > 0);
-
+    
     path_point Insert = (*Path)[Path->Count - 1];
-
+    
     u32 InsertIndex = Path->Count - 1;
     for (u32 i = 0; i < Path->Count - 1; i++) {
         if ((*Path)[i].Time > Insert.Time) {
@@ -789,11 +784,11 @@ u32 SortPath(path_template *Path) {
             break;
         }
     }
-
+    
     //remove points that are too close in time
     if (InsertIndex == Path->Count - 1){
         if ((Path->Count >= 2) && (ABS((*Path)[Path->Count - 2].Time - Insert.Time) < 0.1f)) {
-           (*Path)[Path->Count - 2] = Insert;
+            (*Path)[Path->Count - 2] = Insert;
             Pop(Path);    
             return (Path->Count - 2);
         }    
@@ -803,25 +798,25 @@ u32 SortPath(path_template *Path) {
         Pop(Path);    
         return InsertIndex;
     } 
-
+    
     for (u32 i = Path->Count - 1; i > InsertIndex; i--) {
-       (*Path)[i] =(*Path)[ i - 1];
+        (*Path)[i] =(*Path)[ i - 1];
     }
     (*Path)[InsertIndex] = Insert;
-
+    
     return InsertIndex;
 }
 
 void RemovePathPoint(path_template *Path, u32 RemoveIndex ) {
     assert(RemoveIndex < Path->Count);
-
+    
     for (u32 i = RemoveIndex; i < Path->Count - 1; i++) {
-       (*Path)[i] =(*Path)[i + 1];
+        (*Path)[i] =(*Path)[i + 1];
     }
     Pop(Path);
 }
 
-void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 DeltaSeconds, input GameInput) {
+void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, font *Font, f32 DeltaSeconds, input GameInput) {
 #if 0
     if (GameInput.UpKey.IsPressed) {
         State->Level.Time += 3 * DeltaSeconds;
@@ -836,29 +831,24 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     }
 #endif
     if (State->Editor.CurrentInfo != NULL) {
-
+        
         auto Time = &State->Editor.CurrentInfo->Blueprint.fly.Path.TransitionTime;
         if (WasPressed(GameInput.FireKey)) {
             *Time += 1.0f;
         }
-
+        
         if (WasPressed(GameInput.BombKey)) {
             *Time -= 1.0f;
         } 
-          
-        auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.5f);
+        
+        auto Cursor = UiBeginText(Ui, Font, Ui->Width * 0.5f, Ui->Height * 0.5f);
         UiWrite(&Cursor, "Transition: %f", State->Editor.CurrentInfo->Blueprint.fly.Path.TransitionTime);
         
     }
-
-    glDisable(GL_BLEND);
-    glDisable(GL_TEXTURE_2D);
-    
-    UiBegin();
     
     if (State->Level.SpawnInfos.Count < State->Level.SpawnInfos.Capacity) {    
         rect FlyBlueprintRect = MakeRectWithSize(20, Ui->Height - 80, 60, 60);
-        UiTexturedRect(Ui, State->Assets.FlyTexture, FlyBlueprintRect, MakeRectWithSize(0, 0, State->Assets.FlyTexture.Width, State->Assets.FlyTexture.Height));  
+        UiTexturedRectangle(Ui, State->Assets.FlyTexture, FlyBlueprintRect, MakeRectWithSize(0, 0, State->Assets.FlyTexture.Width, State->Assets.FlyTexture.Height));  
         
         if (UiButton(UiControl, UI_ID0, FlyBlueprintRect)) {
             entity_spawn_info *Info = Push(&State->Level.SpawnInfos);
@@ -874,13 +864,13 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
             State->Editor.CurrentInfo = Info; 
         }
     }
-
+    
     rect AddPathRect =  MakeRectWithSize(20, 160, 60, 60);
     rect PathTypeRect =  MakeRectWithSize(AddPathRect.Left + 100, AddPathRect.Bottom, 64, 64);
     if (State->Editor.CurrentInfo != NULL) {
         if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
             
-            UiTexturedRect(Ui, State->Assets.AddPathButtonTexture, AddPathRect, MakeRectWithSize(0, 0, State->Assets.AddPathButtonTexture.Width, State->Assets.AddPathButtonTexture.Height));
+            UiTexturedRectangle(Ui, State->Assets.AddPathButtonTexture, AddPathRect, MakeRectWithSize(0, 0, State->Assets.AddPathButtonTexture.Width, State->Assets.AddPathButtonTexture.Height));
             auto Info = State->Editor.CurrentInfo;
             
             if (UiButton(UiControl, UI_ID0, AddPathRect)) {
@@ -890,95 +880,101 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
                 
                 if (SortPath(&Info->Blueprint.fly.Path.Points) == 0){
                     if (Info->Blueprint.fly.Path.Points.Count > 1) {
-
+                        
                         f32 AdjustTime = Info->Blueprint.SpawnTime - State->Level.Time;
                         
                         for (u32 i = 1; i < Info->Blueprint.fly.Path.Points.Count; i++) {
-                             Info->Blueprint.fly.Path.Points[i].Time +=  AdjustTime;
+                            Info->Blueprint.fly.Path.Points[i].Time +=  AdjustTime;
                         }   
                     }   
-
+                    
                     Info->Blueprint.fly.Path.Points[0].Time = 0;
                     Info->Blueprint.SpawnTime = State->Level.Time;              
                 }
-
+                
             }  
-
+            
             texture PathTypeTexture;
-
+            
             switch(Info->Blueprint.fly.Path.Type) {
                 case Path_Type_Stop: {
                     PathTypeTexture = State->Assets.PathStopButtonTexture;
                 } break;
-
+                
                 case Path_Type_Loop: {
                     PathTypeTexture = State->Assets.PathLoopButtonTexture;
                 } break;
-
+                
                 case Path_Type_Reverse: {
                     PathTypeTexture = State->Assets.PathReverseButtonTexture;
                 } break;
-
+                
                 case Path_Type_Follow: {
                     PathTypeTexture = State->Assets.PathFollowButtonTexture;
                 } break;
-
+                
                 default: {
                     PathTypeTexture.Object = 0;
                     assert(PathTypeTexture.Object);
                 }
             }
-
-            UiTexturedRect(Ui, PathTypeTexture, PathTypeRect, MakeRectWithSize(0, 0, PathTypeTexture.Width, PathTypeTexture.Height));
-
+            
+            UiTexturedRectangle(Ui, PathTypeTexture, PathTypeRect, MakeRectWithSize(0, 0, PathTypeTexture.Width, PathTypeTexture.Height));
+            
             if (UiButton(UiControl, UI_ID0, PathTypeRect)) {
                 switch (Info->Blueprint.fly.Path.Type) {
                     case Path_Type_Stop: {
                         Info->Blueprint.fly.Path.Type = Path_Type_Loop;
                     } break;
-
+                    
                     case Path_Type_Loop: {
                         Info->Blueprint.fly.Path.Type = Path_Type_Reverse;
                     } break;
-
+                    
                     case Path_Type_Reverse: {
                         Info->Blueprint.fly.Path.Type = Path_Type_Follow;
                     } break;
-
+                    
                     case Path_Type_Follow: {
                         Info->Blueprint.fly.Path.Type = Path_Type_Stop;
                     } break;                    
                 }
             }
-
-            for (s32 i = 0; i < Info->Blueprint.fly.Path.Points.Count; i++) {
-              UiEnd();
+            
+            // go backwards so latest path point is selected with higher prio
+            for (s32 i = Info->Blueprint.fly.Path.Points.Count - 1; i >= 0; i--)
+            {
                 if(i < Info->Blueprint.fly.Path.Points.Count - 1){
                     DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path.Points[i].Position, Info->Blueprint.fly.Path.Points[i + 1].Position, Blue_Color); 
                 }
                 if (Info->Blueprint.fly.Path.Type == Path_Type_Loop){
                     DrawLine(State->Camera, TRANSFORM_IDENTITY, Info->Blueprint.fly.Path.Points[Info->Blueprint.fly.Path.Points.Count - 1].Position, Info->Blueprint.fly.Path.Points[0].Position, Blue_Color);     
                 }
-
-                DrawCircle(State->Camera, transform {Info->Blueprint.fly.Path.Points[i].Position, 0.0f, 0.1f}, Blue_Color, false);
-                UiBegin();
+                
+                u64 ID = UI_ID(i);
+                
+                transform CircleXForm = { Info->Blueprint.fly.Path.Points[i].Position, 0.0f, 0.1f };
+                DrawCircle(State->Camera, CircleXForm, Blue_Color, UiControl->HotId == ID);
                 auto CanvasPoint = WorldToCanvasPoint(State->Camera, Info->Blueprint.fly.Path.Points[i].Position);
                 auto UiPoint = CanvasToUiPoint(Ui, CanvasPoint);
-                auto Cursor = UiBeginText(Ui, Ui->CurrentFont, UiPoint.X - 10, UiPoint.Y - 10, true, Red_Color, 0.3f);
+                auto Cursor = UiBeginText(Ui, Font, UiPoint.X - 10, UiPoint.Y - 10, true, Red_Color, 0.3f);
                 UiWrite(&Cursor, "%d", i);
-
-                rect Rect = MakeRect(UiPoint.X - 10, UiPoint.Y - 10, UiPoint.X + 10, UiPoint.Y + 10);
+                
+                // world circle of radius 0.1 to ui radius
+                s32 UiRadius = CanvasToUiPoint(Ui, WorldToCanvasPoint(State->Camera, TransformPoint(transform{ {}, 0, 0.1}, vec2{ 0, 0.5f}))).Y;
+                
+                rect Rect = MakeRect(UiPoint.X - UiRadius, UiPoint.Y - UiRadius, UiPoint.X + UiRadius, UiPoint.Y + UiRadius);
                 //UiRect(Ui, Rect, Red_Color);
-
+                
                 vec2 DeltaPosition;
-
+                
                 if (State->Editor.DeleteButtonSelected) {
-                    if (UiButton(UiControl, UI_ID(i), Rect)) 
+                    if (UiButton(UiControl, ID, Rect)) 
                         RemovePathPoint(&Info->Blueprint.fly.Path.Points, i);
                     
                 } 
-                else if (UiDragable(UiControl, UI_ID(i), Rect, &DeltaPosition)) {                    
-                    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, Ui->Width * 0.5f, Ui->Height * 0.5f);
+                else if (UiDragable(UiControl, ID, Rect, &DeltaPosition)) {                    
+                    auto Cursor = UiBeginText(Ui, Font, Ui->Width * 0.5f, Ui->Height * 0.5f);
                     //UiWrite(&Cursor, "center: %f, %f", Info->Blueprint.fly, Info->Blueprint.XForm.Pos.Y);
                     
                     UiPoint = UiPoint + DeltaPosition;
@@ -986,14 +982,14 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
                     Info->Blueprint.fly.Path.Points[i].Position = CanvasToWorldPoint(State->Camera, NewCenterCanvasPoint);
                 } 
             }
-
+            
             switch(Info->Blueprint.fly.Path.Type) {
-
+                
             }
         }
     }
-
-
+    
+    
     rect DeleteRect = MakeRectWithSize(20, 80, 60, 60);
     
     if (UiButton(UiControl, UI_ID0, DeleteRect)) {
@@ -1001,10 +997,10 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     }
     
     if (State->Editor.DeleteButtonSelected) {
-        UiTexturedRect(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height), color{1.0f, 0.2f, 0.2f, 1.0f});
+        UiTexturedRectangle(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height), color{1.0f, 0.2f, 0.2f, 1.0f});
     }
     else {
-        UiTexturedRect(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height));
+        UiTexturedRectangle(Ui, State->Assets.DeleteButtonTexture, DeleteRect, MakeRectWithSize(0, 0, State->Assets.DeleteButtonTexture.Width, State->Assets.DeleteButtonTexture.Height));
     }
     
     
@@ -1013,9 +1009,9 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     
     color TimeLineColor = color{ 1, 1, 0, 1};
     
-    UiRect(Ui, TimeLineRect, TimeLineColor, false);
+    UiRectangle(Ui, TimeLineRect, TimeLineColor, false);
     
-    auto Cursor = UiBeginText(Ui, Ui->CurrentFont, TimeLineRect.Left, TimeLineRect.Bottom, true, TimeLineColor);
+    auto Cursor = UiBeginText(Ui, Font, TimeLineRect.Left, TimeLineRect.Bottom, true, TimeLineColor);
     
     s32 Y = (State->Level.Time / State->Level.Duration) * (TimeLineRect.Top - TimeLineRect.Bottom) + TimeLineRect.Bottom;
     vec2 Delta;
@@ -1033,15 +1029,15 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     }
     
     UiLine(Ui, TimeLineRect.Left - 20, Y, TimeLineRect.Right + 10, Y, color{1, 0.7f, 0, 1});
-
+    
     if (State->Editor.CurrentInfo != NULL) {
-
+        
         if (State->Editor.CurrentInfo->Blueprint.Type == Entity_Type_Fly) {
             u32 XPathPoint = TimeLineRect.Left - 20;
-
+            
             for (s32 i = 0; i < State->Editor.CurrentInfo->Blueprint.fly.Path.Points.Count; i++) {
                 u32 YPathpoint = (State->Editor.CurrentInfo->Blueprint.fly.Path.Points[i].Time + State->Editor.CurrentInfo->Blueprint.SpawnTime) / State->Level.Duration * (TimeLineRect.Top - TimeLineRect.Bottom) + TimeLineRect.Bottom;
-
+                
                 auto Cursor = UiBeginText(Ui, &State->Assets.DefaultFont, XPathPoint, YPathpoint, true, Red_Color, 0.3);
                 UiWrite(&Cursor, "%d", i);
             }
@@ -1053,23 +1049,28 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
     
     u32 SpawnIndex = 0;
     
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GEQUAL, 0.1f);    
     
     while (SpawnIndex < State->Level.SpawnInfos.Count) {
         auto Info = State->Level.SpawnInfos.Base + SpawnIndex;
         bool HasSpawned = false;
-
+        
         if (State->Level.Time >= Info->Blueprint.SpawnTime) {
             HasSpawned = true;
-
+            
         }
         if (Info->Blueprint.Type == Entity_Type_Fly) {
             UpdateFlyPosition(&Info->Blueprint, State->Level.Time);
         }
-
+        
         transform CollisionTransform = Info->Blueprint.XForm;
         CollisionTransform.Scale = 2 * Info->Blueprint.CollisionRadius;
         DrawCircle(State->Camera, CollisionTransform, color{0.3f, 0.3f, 0.0f, 1.0f}, false, 16, -0.5f);
-  
+        
         glEnable(GL_TEXTURE_2D);
         DrawEntity(State, &Info->Blueprint, color {1, 1, 1, (HasSpawned ? 1.0f : 0.3f)});
         glDisable(GL_TEXTURE_2D);
@@ -1084,7 +1085,7 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         f32 UiRadius = CollisionBorderUiPoint.X - UiPoint.X;
         
         rect Rect = MakeRectWithSize(UiPoint.X - UiRadius, UiPoint.Y - UiRadius, 2 * UiRadius, 2 * UiRadius);        
-
+        
         u64 Id = UI_ID(SpawnIndex);
         color Color;
         if (UiControl->HotId == Id) {
@@ -1096,17 +1097,17 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
         else {
             Color = { 0.6f, 0.23f, 0.6234f, 1.0f };
         }
-
+        
         if (!HasSpawned)
             Color.A = 0.3f;
-
-        UiRect(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, Color, false);
+        
+        UiRectangle(Ui, Rect.Left, Rect.Bottom, Rect.Right - Rect.Left, Rect.Top - Rect.Bottom, Color, false);
         
         if(State->Editor.DeleteButtonSelected) {
             if (UiButton(UiControl, Id, Rect)) 
             {
                 u64 IDDeleted = State->Level.SpawnInfos[SpawnIndex].ID;
-
+                
                 for(u32 i = 0; i < State->Level.SpawnInfos.Count; i++) {
                     if (State->Level.SpawnInfos[i].Blueprint.Type != Entity_Type_Fly)
                         continue;
@@ -1115,13 +1116,13 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
                         State->Level.SpawnInfos[i].Blueprint.fly.Path.Following = NULL;
                     }                    
                 }
-
+                
                 State->Level.SpawnInfos[SpawnIndex] = State->Level.SpawnInfos[State->Level.SpawnInfos.Count - 1]; 
                 Pop(&State->Level.SpawnInfos);  
-
+                
                 if (State->Editor.CurrentInfo == Info) 
                     State->Editor.CurrentInfo = NULL;
-
+                
             }
         }
         else {
@@ -1131,16 +1132,14 @@ void UpdateEditor(game_state *State, ui_context *Ui, ui_control *UiControl, f32 
                     State->Editor.CurrentInfo->Blueprint.fly.Path.IDFollowing = Info->ID;
                 } 
                 else 
-                State->Editor.CurrentInfo = Info;
+                    State->Editor.CurrentInfo = Info;
             }
         }        
         SpawnIndex++;
     }
-    
-    UiEnd();
 }
 
-void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaSeconds){
+void UpdateGameOver(game_state *State, input GameInput, ui_context *Ui, font *Font, f32 DeltaSeconds){
     State->Player->XForm.Rotation += 2 * PI * DeltaSeconds;
     
     if (WasPressed(GameInput.EnterKey)) {
@@ -1149,7 +1148,7 @@ void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaS
         State->Mode = Mode_Game;        
     }
     
-    auto Cursor = UiBeginText(&Ui, Ui.CurrentFont, Ui.Width / 2, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
+    auto Cursor = UiBeginText(Ui, Font, Ui->Width / 2, Ui->Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 5.0f);
     UiWrite(&Cursor, 
             "Game Over");
     
@@ -1167,7 +1166,7 @@ void UpdateGameOver(game_state *State, input GameInput, ui_context Ui,f32 DeltaS
     DrawAllEntities(State);                            
 }
 
-void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control UiControl, f32 DeltaSeconds){    
+void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control *UiControl, font *Font, f32 DeltaSeconds){    
     
     //State->Camera.WorldPosition.y += DeltaSeconds;
     
@@ -1409,7 +1408,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
             i++;
         }
     }
-
+    
     if (WasPressed(GameInput.EnterKey)) {
         initGame(State);
         return;
@@ -1465,7 +1464,7 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
         
 #endif
     }
-                
+    
     if(GameInput.FireKey.IsPressed) {
         if ((State->BulletSpawnCooldown <= 0)) {
             entity *Bullet = NextEntity(Entities);
@@ -1513,12 +1512,6 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     
     // render
     
-    glEnable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_ALPHA_TEST);
-    glAlphaFunc(GL_GEQUAL, 0.1f);
-    
 #if 0
     //background
     transform backgroundXForm = TRANSFORM_IDENTITY;
@@ -1529,21 +1522,16 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
     
     DrawAllEntities(State);
     
-    glDisable(GL_BLEND);
-    glDisable(GL_TEXTURE_2D);
-    
     //GUI
     {
-        UiBegin();
-        
         //bomb count           
         for (int Bomb = 0; Bomb < State->Player->player.Bombs; Bomb++){
-            UiTexturedRect(Ui, State->Assets.BombCountTexture, 20 + Bomb * (State->Assets.BombCountTexture.Width + 5), Ui->Height - 250, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, 0, 0, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, White_Color);
+            UiTexturedRectangle(Ui, State->Assets.BombCountTexture, 20 + Bomb * (State->Assets.BombCountTexture.Width + 5), Ui->Height - 250, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, 0, 0, State->Assets.BombCountTexture.Width, State->Assets.BombCountTexture.Height, White_Color);
         }
         
         //boss Hp
         if (Boss) {
-            auto Cursor = UiBeginText(Ui, Ui->CurrentFont, 20, Ui->Height - 90);
+            auto Cursor = UiBeginText(Ui, Font, 20, Ui->Height - 90);
             UiWrite(&Cursor, "BOSS ");
             UiWrite(&Cursor, "Hp: %i / %i", Boss->Hp, Boss->MaxHp);
             
@@ -1552,8 +1540,6 @@ void UpdateGame(game_state *State, input GameInput, ui_context *Ui, ui_control U
         
         //player Power
         UiBar(Ui, 20, Ui->Height - 200, 120,40, (State->Player->player.Power % 20) / 20.0f, color{1.0f, 0.0f, 0.0f, 1.0f}, color{0.0f, 1.0f, 0.0f, 1.0f});
-        
-        UiEnd();
     }
 }
 // gl functions
@@ -1673,10 +1659,12 @@ int main(int argc, char* argv[]) {
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generatet in function call scope
         glDebugMessageCallback(wostenGLDebugCallback, NULL);
     }    
-   
+    
     histogram FrameRateHistogram = {};
     
-    ui_context Ui = {};
+    ui_context Ui;
+    Init(&Ui);
+    
     ui_control UiControl = {};
     
     bool DoContinue = true;
@@ -1696,7 +1684,7 @@ int main(int argc, char* argv[]) {
     State.Level.WorldHeight = State.Level.LayersWorldUnitsPerPixels[0] * State.Assets.LevelLayer1.Height;  
     State.Entities = { ARRAY_WITH_COUNT(_entitieEntries) };
     State.Editor.DeleteButtonSelected = false;
-
+    
     State.Assets.LevelLayer1 = LoadTexture("data/level_1.png");
     State.Assets.LevelLayer2 = LoadTexture("data/level_1_layer_2.png");
     State.Assets.PlayerTexture = LoadTexture("data/Kenney/Animals/giraffe.png");
@@ -1738,7 +1726,7 @@ int main(int argc, char* argv[]) {
         s32 XOffset = 0;
         s32 YOffset = 0;
         s32 MaxHight = 0;
-            
+        
         //    while (text[ch]) 
         
         for (u32 i = ' '; i < 256; i++) {   
@@ -1780,9 +1768,9 @@ int main(int argc, char* argv[]) {
         State.Assets.DefaultFont.Texture = LoadTexture(Bitmap, BitmapWidth, BitmapWidth, 1, GL_NEAREST);    
         delete[] Data;
     }
-
-    Ui.CurrentFont = &State.Assets.DefaultFont;
-
+    
+    auto DefaultFont = &State.Assets.DefaultFont;
+    
     //sound init
     int MixInit = Mix_Init(MIX_INIT_MP3);
     if(MixInit&MIX_INIT_MP3 != MIX_INIT_MP3) {
@@ -1804,34 +1792,34 @@ int main(int argc, char* argv[]) {
     //sfx
     Mix_AllocateChannels(1);
     Mix_Volume(0, Config.SfxVolume);
-
+    
     State.Assets.SfxDeath =Mix_LoadWAV("data/Gravity Sound/Low Health.wav");
     if(!State.Assets.SfxDeath) {
         printf("Error loading music file: %s \n", Mix_GetError());
     }
-
+    
     State.Assets.SfxBomb = Mix_LoadWAV("data/Gravity Sound/Level Up 4.wav");    
     if(!State.Assets.SfxBomb) {
         printf("Error loading music file: %s \n", Mix_GetError());
     }
-
+    
     State.Assets.SfxShoot = Mix_LoadWAV("data/Gravity Sound/Dropping Item 6.wav");    
     if(!State.Assets.SfxShoot) {
         printf("Error loading music file: %s \n", Mix_GetError());
     }
-      
+    
     State.Level = LoadLevel("data/levels/Level.bin");
-
+    
 #if defined WIN32
 	if (!CreateDirectoryA("data/levels", NULL))
 	{
 		SDL_assert_release(GetLastError() == ERROR_ALREADY_EXISTS);
 	}
 #else
-#  #error Platform not supported 
+    #  #error Platform not supported 
 #endif
-
-    SaveLevel("data/levels/LevelBackup.bin", State.Level);
+    
+        SaveLevel("data/levels/LevelBackup.bin", State.Level);
     
     RestoreFollowingPointer(&State.Level.SpawnInfos);
     initGame(&State);
@@ -1991,6 +1979,8 @@ int main(int argc, char* argv[]) {
         glClear(GL_COLOR_BUFFER_BIT);
         
         glEnable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_ALPHA_TEST);
         
         FrameRateHistogram.Values[FrameRateHistogram.CurrentIndex] = 1 / DeltaSeconds;
         FrameRateHistogram.CurrentIndex++;
@@ -2001,11 +1991,11 @@ int main(int argc, char* argv[]) {
         //game update
         switch (State.Mode) {
             case Mode_Title: {
-                UpdateTitle(&State, &Ui, &UiControl, DeltaSeconds, GameInput, &DoContinue);   
+                UpdateTitle(&State, &Ui, &UiControl, DefaultFont, DeltaSeconds, GameInput, &DoContinue);   
             } break;
-
+            
             case Mode_Settings: {
-                UpdateSettings(&State, &Ui, &UiControl, DeltaSeconds, GameInput, Window);
+                UpdateSettings(&State, &Ui, &UiControl, DefaultFont, DeltaSeconds, GameInput, Window);
             } break;
             
             case Mode_Game: {
@@ -2013,11 +2003,11 @@ int main(int argc, char* argv[]) {
                     State.Mode = Mode_Editor;
                     break;
                 };
-                UpdateGame(&State, GameInput, &Ui, UiControl, DeltaSeconds);
+                UpdateGame(&State, GameInput, &Ui, &UiControl, DefaultFont, DeltaSeconds);
             } break;
             
             case Mode_Game_Over: {
-                UpdateGameOver(&State, GameInput, Ui, DeltaSeconds);
+                UpdateGameOver(&State, GameInput, &Ui, DefaultFont, DeltaSeconds);
             } break;
             
             case Mode_Editor: { 
@@ -2025,7 +2015,7 @@ int main(int argc, char* argv[]) {
                     State.Mode = Mode_Game;
                     break;
                 };
-                UpdateEditor(&State, &Ui, &UiControl, DeltaSeconds, GameInput);
+                UpdateEditor(&State, &Ui, &UiControl, DefaultFont, DeltaSeconds, GameInput);
             } break;
             
             default: {
@@ -2033,23 +2023,23 @@ int main(int argc, char* argv[]) {
             } break;
         }            
         
-    //debug framerate, hitbox and player/boss normalized x, y coordinates
-    #ifdef DEBUG_UI
+        //debug framerate, hitbox and player/boss normalized x, y coordinates
+#ifdef DEBUG_UI
         DrawHistogram(FrameRateHistogram);    
-
-    #endif //DEBUG_UI
-    
-        UiBegin();
+        
+#endif //DEBUG_UI
+        
         {
-            auto Cursor = UiBeginText(&Ui, &State.Assets.DefaultFont, 10, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
+            auto Cursor = UiBeginText(&Ui, DefaultFont, 10, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
             //UiWrite(&Cursor, "mouse Pos: %f, %f [%i, %i]\n", UiControl.Cursor.X, UiControl.Cursor.Y, GameInput.LeftMouseKey.IsPressed, GameInput.LeftMouseKey.HasChanged);            
             //UiWrite(&Cursor, "UiControl: [active: %llu, hot: %llu]\n", UiControl.ActiveId, UiControl.HotId);
             UiWrite(&Cursor, "Entities: [%llu / %llu] \n", State.Entities.Count, State.Entities.Capacity);
         }           
         
-        UiRect(&Ui, UiControl.Cursor.X - 10, UiControl.Cursor.Y - 10, 20, 20, color { 1.0f, 0, 0, 1.0f });
+        //UiRectangle(&Ui, UiControl.Cursor.X - 10, UiControl.Cursor.Y - 10, 20, 20, color { 1.0f, 0, 0, 1.0f });
         
-        UiEnd();        
+        UiRenderCommands(&Ui);
+        
         // render end
         
         auto glError = glGetError();
