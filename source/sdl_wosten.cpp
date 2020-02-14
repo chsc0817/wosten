@@ -1821,6 +1821,16 @@ int main(int argc, char* argv[]) {
     }
       
     State.Level = LoadLevel("data/levels/Level.bin");
+
+#if defined WIN32
+	if (!CreateDirectoryA("data/levels", NULL))
+	{
+		SDL_assert_release(GetLastError() == ERROR_ALREADY_EXISTS);
+	}
+#else
+#  #error Platform not supported 
+#endif
+
     SaveLevel("data/levels/LevelBackup.bin", State.Level);
     
     RestoreFollowingPointer(&State.Level.SpawnInfos);
@@ -2032,8 +2042,8 @@ int main(int argc, char* argv[]) {
         UiBegin();
         {
             auto Cursor = UiBeginText(&Ui, &State.Assets.DefaultFont, 10, Ui.Height / 2, true, color{1.0f, 0.0f, 0.0f, 1.0f}, 1.0f);
-            UiWrite(&Cursor, "mouse Pos: %f, %f [%i, %i]\n", UiControl.Cursor.X, UiControl.Cursor.Y, GameInput.LeftMouseKey.IsPressed, GameInput.LeftMouseKey.HasChanged);            
-            UiWrite(&Cursor, "UiControl: [active: %llu, hot: %llu]\n", UiControl.ActiveId, UiControl.HotId);
+            //UiWrite(&Cursor, "mouse Pos: %f, %f [%i, %i]\n", UiControl.Cursor.X, UiControl.Cursor.Y, GameInput.LeftMouseKey.IsPressed, GameInput.LeftMouseKey.HasChanged);            
+            //UiWrite(&Cursor, "UiControl: [active: %llu, hot: %llu]\n", UiControl.ActiveId, UiControl.HotId);
             UiWrite(&Cursor, "Entities: [%llu / %llu] \n", State.Entities.Count, State.Entities.Capacity);
         }           
         
